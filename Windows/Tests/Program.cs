@@ -26,6 +26,10 @@ int passed = 0;
 void Check(bool value, string name) { if (!value) throw new InvalidOperationException(name); passed++; Console.WriteLine("PASS " + name); }
 try
 {
+    var nestedRoot = Path.Combine(root, "missing-parent", "missing-root");
+    var nestedStore = new BoardStore(nestedRoot); var nestedCard = nestedStore.Create();
+    var nestedPreferences = new PreferenceStore(Path.Combine(root, "missing-preferences-parent", "missing-preferences-root")); nestedPreferences.Load();
+    Check(nestedStore.RecoveryKey is null && nestedStore.SaveError is null && nestedCard is Guid && nestedStore.Flush() && new BoardStore(nestedRoot).Find(nestedCard.Value) is not null && nestedPreferences.Error is null && nestedPreferences.Save(new Preferences { Language = "ja", Query = "Nested private fixture" }), "Two missing private path components are created, loaded and persisted for board and preferences");
     var store = new BoardStore(Path.Combine(root, "board"));
     var locale = new Locale("auto"); var preservedTitle = "User title: ação 日本語"; store.SetTitle(preservedTitle);
     foreach (var language in Locale.Supported) { locale.Set(language); Check(locale.Language == language && locale.T("column.doing.title") != "column.doing.title" && !locale.T("column.doing.tutorial.step1", "", ("limit", 3)).Contains("{limit}") && store.Snapshot.BoardTitle == preservedTitle, "Locale and untouched user text: " + language); }

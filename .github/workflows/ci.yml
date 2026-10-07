@@ -127,9 +127,21 @@ jobs:
         run: |
           $exe = Join-Path $env:GITHUB_WORKSPACE 'dist/windows/win-x64/Kornucopia.exe'
           $smoke = Join-Path $env:RUNNER_TEMP 'Kornucopia-smoke'
-          $process = Start-Process -FilePath $exe -ArgumentList '--smoke-test', $smoke -PassThru
+          $stdout = Join-Path $env:RUNNER_TEMP 'Kornucopia-smoke-stdout.txt'
+          $stderr = Join-Path $env:RUNNER_TEMP 'Kornucopia-smoke-stderr.txt'
+          $process = Start-Process -FilePath $exe -ArgumentList '--smoke-test', $smoke -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
           if (!$process.WaitForExit(120000)) { $process.Kill(); throw 'WPF smoke test timed out.' }
-          if ($process.ExitCode -ne 0) { throw 'WPF smoke test failed.' }
+          if ($process.ExitCode -ne 0) {
+            foreach ($diagnostic in @((Join-Path $smoke 'smoke-failure.txt'), $stdout, $stderr)) {
+              if (Test-Path $diagnostic -PathType Leaf) {
+                $text = [IO.File]::ReadAllText($diagnostic)
+                if ($text.Length -gt 8000) { $text = $text.Substring(0, 8000) }
+                $text = $text -replace '/Users/[^/\s]+', '<user-home>' -replace '[A-Za-z]:\\Users\\[^\\\s]+', '<user-home>' -replace 'gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]+', '<credential>'
+                Write-Output ('SYNTHETIC_SMOKE_DIAGNOSTIC ' + $text)
+              }
+            }
+            throw ('WPF smoke test failed with exit code ' + $process.ExitCode)
+          }
           foreach ($file in @('pt-BR.png', 'en.png', 'es.png', 'fr.png', 'ja.png', 'smoke-report.json')) {
             if (!(Test-Path (Join-Path $smoke $file))) { throw "WPF smoke evidence was not generated: $file" }
           }

@@ -11,6 +11,9 @@ namespace Kornucopia.Windows;
 
 internal static class Smoke
 {
+    // Evidence may live in a broadly accessible CI output folder. Model data
+    // stays in a fresh directory created privately by the same guarded store.
+    internal static string NewDataDirectory() => Path.Combine(Path.GetTempPath(), "Kornucopia-smoke-" + Guid.NewGuid().ToString("N"));
     public static async Task Run(MainWindow main, string output)
     {
         Directory.CreateDirectory(output);
@@ -31,7 +34,8 @@ internal static class Smoke
         main.Store.Move(b, "done"); main.Store.Update(a, title: "In production"); main.Store.Update(b, title: "Completed sample");
         var removed = main.CreateCard("backlog", false)!.Value;
         Check(main.Store.Delete(removed) && main.Store.Find(removed) is null, "Delete card");
-        Check(main.Store.Flush(), "Atomic board save");
+        if (!main.Store.Flush()) throw new InvalidOperationException("Synthetic atomic board save failed: " + (main.Store.SaveErrorKey ?? "storage I/O"));
+        Check(true, "Atomic board save");
         var reopened = new BoardStore(main.Store.DirectoryPath);
         Check(reopened.Snapshot.Cards.SequenceEqual(main.Store.Snapshot.Cards) && reopened.Snapshot.WipLimit == 3, "Reopen preserves all card fields, order and WIP");
         var scrollingFixtures = Enumerable.Range(0, 12).Select(_ => main.CreateCard("backlog", false)!.Value).ToArray();
@@ -72,13 +76,14 @@ internal static class Smoke
             passed = true, version = typeof(MainWindow).Assembly.GetName().Version?.ToString(3), checks, languages = Locale.Supported,
             operatingSystem = Environment.OSVersion.VersionString,
             scope = "Owned WPF window, native editor controls, board commands, bounded column pagination, global search and model persistence. Mouse drag gestures are not simulated. No desktop screenshot or personal data is read.",
-            dataIsolation = "Fresh dedicated smoke directory; never the normal LocalAppData board."
+            dataIsolation = "Fresh private UUID directories under the account temporary folder, created and verified by the guarded store. Evidence output is separate. Never the normal LocalAppData board."
         }, new JsonSerializerOptions { WriteIndented = true }));
     }
     static async Task PagingStress(MainWindow owner, string output, Action<bool, string> check)
     {
-        var directory = Path.Combine(output, "paging-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory);
+        var directory = NewDataDirectory();
+        var preparation = new BoardStore(directory);
+        if (preparation.SaveError is not null) throw new InvalidOperationException("Synthetic private paging storage initialization was refused: " + (preparation.SaveErrorKey ?? "storage I/O"));
         var fixtures = new List<Card>();
         foreach (var (column, count) in new[] { ("backlog", 1205), ("doing", 2), ("review", 1101), ("done", 1001) })
             for (var index = 0; index < count; index++)
@@ -86,6 +91,8 @@ internal static class Smoke
         File.WriteAllBytes(Path.Combine(directory, "board.json"), JsonSerializer.SerializeToUtf8Bytes(new BoardSnapshot { Cards = fixtures.AsReadOnly() }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
         var store = new BoardStore(directory);
         var preferences = new PreferenceStore(directory); preferences.Load();
+        if (store.SaveError is not null || preferences.Error is not null)
+            throw new InvalidOperationException("Synthetic private paging fixture was refused: " + (store.SaveErrorKey ?? preferences.ErrorKey ?? "storage I/O"));
         var window = new MainWindow(store, preferences, new Locale("en"), true) { Owner = owner };
         window.Show();
         try
