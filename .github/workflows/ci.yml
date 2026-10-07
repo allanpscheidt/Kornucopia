@@ -1,0 +1,26 @@
+name: Mac Apple Silicon
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Require Apple Silicon
+        run: test "$(uname -m)" = arm64
+      - name: Audit public files
+        run: python3 scripts/audit-publication.py --check-index
+      - name: Build, test and inspect release
+        run: ./scripts/package-release.sh

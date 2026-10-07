@@ -1,0 +1,31 @@
+# Generated bundles, test sessions and release assets stay outside source control.
+/build/
+/qa/
+/dist/
+/out/
+/Resources/AppIcon.icns
+/Resources/AppIcon.iconset/
+*.app/
+*.dSYM/
+.DS_Store
+._*
+*.xcuserstate
+xcuserdata/
+.swiftpm/
+.build/
+
+# Personal state, credentials and local configuration.
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.mobileprovision
+*.sqlite
+*.sqlite3
+*.db
+board.json
+board.backup.json
+*.corrupt-*.json
+*.log
