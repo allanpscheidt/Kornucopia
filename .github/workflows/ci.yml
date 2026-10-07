@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Prepare draft release v1.0.1 with verified assets
+        type: boolean
+        default: false
+        required: false
 
 permissions:
   contents: read
@@ -171,3 +177,151 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
           include-hidden-files: false
+
+  publish-release:
+    name: Prepare draft release and Windows visual evidence
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_release && github.ref == 'refs/heads/main'
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    concurrency:
+      group: kornucopia-release-v1.0.1
+      cancel-in-progress: false
+    steps:
+      - name: Checkout release notes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download verified macOS files from this run
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: Kornucopia-1.0.1-macOS-arm64
+          path: release-assets/macOS-arm64
+      - name: Download verified Windows x64 files from this run
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: Kornucopia-1.0.1-windows-x64
+          path: release-assets/windows-x64
+      - name: Download verified Windows ARM64 files from this run
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: Kornucopia-1.0.1-windows-arm64
+          path: release-assets/windows-arm64
+      - name: Download synthetic Windows visual evidence from this run
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: Windows-Server-WPF-smoke
+          path: windows-evidence
+      - name: Windows visual evidence
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, hashlib, json, re, struct
+
+          root = Path('windows-evidence')
+          locales = ('pt-BR', 'en', 'es', 'fr', 'ja')
+          expected = {f'{locale}.png' for locale in locales} | {'smoke-report.json'}
+          entries = list(root.rglob('*'))
+          if any(path.is_symlink() for path in entries) or {path.relative_to(root).as_posix() for path in entries if path.is_file()} != expected:
+              raise SystemExit('Unexpected or missing synthetic visual evidence.')
+          report = json.loads((root / 'smoke-report.json').read_text(encoding='utf-8'))
+          fields = {'passed', 'version', 'checks', 'languages', 'operatingSystem', 'scope', 'dataIsolation'}
+          if set(report) != fields or report['passed'] is not True or report['version'] != '1.0.1' or set(report['languages']) != set(locales):
+              raise SystemExit('Synthetic WPF smoke report failed validation.')
+          compact = json.dumps(report, ensure_ascii=False, separators=(',', ':'))
+          if len(compact) > 20000 or re.search(r'/Users/|/home/|[A-Za-z]:\\Users\\|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_', compact):
+              raise SystemExit('Synthetic WPF report contains unexpected private content.')
+          print('BEGIN_KORNUCOPIA_SMOKE_REPORT')
+          print(compact)
+          print('END_KORNUCOPIA_SMOKE_REPORT')
+          for locale in locales:
+              data = (root / f'{locale}.png').read_bytes()
+              if not 24 <= len(data) <= 2000000 or data[:8] != b'\x89PNG\r\n\x1a\n' or data[12:16] != b'IHDR':
+                  raise SystemExit('Invalid synthetic PNG evidence.')
+              width, height = struct.unpack('>II', data[16:24])
+              if not (1 <= width <= 4096 and 1 <= height <= 4096):
+                  raise SystemExit('Unexpected synthetic PNG dimensions.')
+              print(f'KORNUCOPIA_PNG_INFO {locale} bytes={len(data)} sha256={hashlib.sha256(data).hexdigest()}')
+              print(f'BEGIN_KORNUCOPIA_PNG {locale}')
+              encoded = base64.b64encode(data).decode('ascii')
+              for offset in range(0, len(encoded), 1024):
+                  print(encoded[offset:offset + 1024])
+              print(f'END_KORNUCOPIA_PNG {locale}')
+          PY
+      - name: Verify six assets and create draft only
+        id: draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json, os, re, subprocess
+
+          tag = 'v1.0.1'
+          repo = os.environ['GH_REPO']
+          pairs = (
+              ('macOS-arm64', 'Kornucopia-v1.0.1-macOS-arm64.zip', 'SHA256SUMS.txt'),
+              ('windows-x64', 'Kornucopia-1.0.1-windows-x64.zip', 'SHA256SUMS-windows-x64.txt'),
+              ('windows-arm64', 'Kornucopia-1.0.1-windows-arm64.zip', 'SHA256SUMS-windows-arm64.txt'),
+          )
+          assets = []
+          expected = {}
+          for directory, archive, checksum in pairs:
+              folder = Path('release-assets') / directory
+              entries = list(folder.rglob('*'))
+              if any(path.is_symlink() for path in entries) or {path.relative_to(folder).as_posix() for path in entries if path.is_file()} != {archive, checksum}:
+                  raise SystemExit('Release artifact allowlist failed.')
+              checksum_path = folder / checksum
+              match = re.fullmatch(r'([0-9a-f]{64})  ' + re.escape(archive) + r'\r?\n?', checksum_path.read_text(encoding='utf-8'))
+              archive_path = folder / archive
+              digest = hashlib.file_digest(archive_path.open('rb'), 'sha256').hexdigest()
+              if not match or match[1] != digest:
+                  raise SystemExit('Release archive checksum failed.')
+              for path in (archive_path, checksum_path):
+                  with path.open('rb') as stream:
+                      expected[path.name] = (path.stat().st_size, 'sha256:' + hashlib.file_digest(stream, 'sha256').hexdigest())
+                  assets.append(str(path))
+              print(f'PASS SHA256 {archive}: {digest}')
+          if len(expected) != 6:
+              raise SystemExit('Exactly six unique distribution assets are required.')
+
+          def api_pages(endpoint):
+              result = subprocess.run(['gh', 'api', '--paginate', '--slurp', f'repos/{repo}/{endpoint}?per_page=100'], capture_output=True, text=True)
+              if result.returncode:
+                  raise RuntimeError('GitHub API request failed; no existing release will be changed.')
+              return [item for page in json.loads(result.stdout) for item in page]
+
+          def release_state(release):
+              draft = str(release['draft']).lower()
+              print(f"RELEASE_STATE tag={tag} id={release['id']} draft={draft} assets={len(release['assets'])} url={release['html_url']}")
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+                  summary.write(f"\nRelease `{tag}`: ID `{release['id']}`, draft `{draft}`, assets `{len(release['assets'])}`. [Inspect release]({release['html_url']}).\n")
+              with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+                  output.write(f"release_id={release['id']}\ndraft={draft}\nrelease_url={release['html_url']}\n")
+
+          existing = [release for release in api_pages('releases') if release['tag_name'] == tag]
+          if existing:
+              release_state(existing[0])
+              raise SystemExit('Release or draft already exists. Inspect it manually; it will not be overwritten.')
+          if any(item['name'] == tag for item in api_pages('tags')):
+              raise SystemExit('Release tag already exists. Inspect it manually before creating a release.')
+
+          result = subprocess.run(['gh', 'release', 'create', tag, *assets, '--draft', '--target', os.environ['GITHUB_SHA'], '--title', 'Kornucopia 1.0.1', '--notes-file', 'docs/release-1.0.1.pt-BR.md'], capture_output=True, text=True)
+          releases = [release for release in api_pages('releases') if release['tag_name'] == tag]
+          if releases:
+              release_state(releases[0])
+          if result.returncode or len(releases) != 1:
+              raise SystemExit('Draft creation did not complete. Inspect the release status above; do not retry or overwrite automatically.')
+          release = releases[0]
+          remote = release['assets']
+          if release['draft'] is not True or release['target_commitish'] != os.environ['GITHUB_SHA'] or len(remote) != 6 or {asset['name'] for asset in remote} != set(expected):
+              raise SystemExit('Draft metadata or six-asset allowlist failed. Preserve the draft for manual inspection.')
+          for asset in remote:
+              size, digest = expected[asset['name']]
+              if asset['state'] != 'uploaded' or asset['size'] != size or asset.get('digest') != digest:
+                  raise SystemExit('Uploaded asset verification failed. Preserve the draft for manual inspection.')
+          print('PASS: draft v1.0.1 contains exactly six verified distribution assets. Publication remains a manual UI action after visual review.')
+          PY
