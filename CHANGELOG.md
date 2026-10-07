@@ -1,5 +1,16 @@
 # Histórico de versões
 
+## 1.0.2
+
+- Limites de arquivo, notas, texto, profundidade e trabalho de leitura antes de desserializar quadros no Mac e no Windows.
+- Verificação de arquivo regular, recusa de links e leitura limitada para o principal e o backup.
+- Preservação segura de entradas recusadas e recuperação por backup, com aviso ao usuário.
+- Proteção para impedir que edições gerem quadros que o próprio app não consegue reabrir.
+- Paginação de 100 notas por coluna no Windows, com busca em todo o quadro.
+- Textos recusados permanecem no editor e podem ser copiados antes de fechar.
+- Salvamento pausado quando outra sessão altera o arquivo principal.
+- Leitura limitada e validação de recursos no arquivo de preferências do Windows.
+
 ## 1.0.1
 
 - Tutorial prático em cada coluna, com orientação sobre o próximo passo no fluxo.

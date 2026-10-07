@@ -24,6 +24,7 @@ public static class Program
         var locale = new Locale(preferences.Value.Language);
         var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
         var window = new MainWindow(store, preferences, locale, smoke);
+        app.SessionEnding += (_, ending) => ending.Cancel = !window.PrepareForClosing();
         if (smoke)
         {
             window.Loaded += async (_, _) =>

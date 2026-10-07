@@ -49,18 +49,9 @@ struct BoardView: View {
             if sheet == nil { searchFocused = true }
         }
         .onAppear {
-            guard !restoredSession else { return }
-            restoredSession = true
-            if let message = store.recoveryMessage {
-                let alert = NSAlert()
-                alert.messageText = L("recovery.title")
-                alert.informativeText = message
-                alert.addButton(withTitle: L("action.understood"))
-                alert.runModal()
-            }
-            if let value = AppPreferences.defaults.string(forKey: sessionKey),
-               let id = UUID(uuidString: value), store.card(id: id) != nil { sheet = .card(id) }
+            if NSApp.isRunning { DispatchQueue.main.async { restoreSession() } }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .kanbanReady)) { _ in restoreSession() }
         .onChange(of: sheet?.id) { _, _ in
             if case .card(let id) = sheet { AppPreferences.defaults.set(id.uuidString, forKey: sessionKey) }
             else { AppPreferences.defaults.removeObject(forKey: sessionKey) }
@@ -77,6 +68,16 @@ struct BoardView: View {
             let alert = NSAlert()
             alert.messageText = L("wip.title")
             alert.informativeText = L("wip.body", ["limit": String(store.snapshot.wipLimit)])
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: L("action.understood"))
+            alert.runModal()
+        }
+        .onChange(of: store.storageAlert) { _, key in
+            guard let key else { return }
+            store.storageAlert = nil
+            let alert = NSAlert()
+            alert.messageText = L("storage.alertTitle")
+            alert.informativeText = L(key) + "\n\n" + L("storage.editRejected")
             alert.alertStyle = .warning
             alert.addButton(withTitle: L("action.understood"))
             alert.runModal()
@@ -154,6 +155,20 @@ struct BoardView: View {
 
     private func create(in column: KanbanColumn) {
         if let id = store.createCard(in: column, color: .yellow) { query = ""; sheet = .card(id) }
+    }
+
+    private func restoreSession() {
+        guard !restoredSession else { return }
+        restoredSession = true
+        if let message = store.recoveryMessage {
+            let alert = NSAlert()
+            alert.messageText = L("recovery.title")
+            alert.informativeText = message
+            alert.addButton(withTitle: L("action.understood"))
+            alert.runModal()
+        }
+        if let value = AppPreferences.defaults.string(forKey: sessionKey),
+           let id = UUID(uuidString: value), store.card(id: id) != nil { sheet = .card(id) }
     }
 }
 
@@ -359,11 +374,34 @@ private struct WindowConfiguration: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { ConfigurationView() }
     func updateNSView(_ nsView: NSView, context: Context) {}
     final class ConfigurationView: NSView {
+        private var closeGuard: WindowCloseGuard?
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             guard let window else { return }
             window.setFrameAutosaveName(AppPreferences.scopeID == "personal" ? "KornucopiaBoard" : "KornucopiaBoard." + AppPreferences.scopeID)
             window.backgroundColor = NSColor(red: 244/255, green: 248/255, blue: 247/255, alpha: 1)
+            if closeGuard == nil {
+                let guardDelegate = WindowCloseGuard(previous: window.delegate)
+                closeGuard = guardDelegate
+                window.delegate = guardDelegate
+            }
         }
+    }
+}
+
+/// Preserve SwiftUI's delegate behavior while checking drafts before closing the window.
+@MainActor
+private final class WindowCloseGuard: NSObject, NSWindowDelegate {
+    private let previous: NSWindowDelegate?
+    init(previous: NSWindowDelegate?) { self.previous = previous; super.init() }
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard PendingEditorDraft.permitsClosing() else { return false }
+        return previous?.windowShouldClose?(sender) ?? true
+    }
+    nonisolated override func responds(to selector: Selector!) -> Bool {
+        MainActor.assumeIsolated { super.responds(to: selector) || previous?.responds(to: selector) == true }
+    }
+    nonisolated override func forwardingTarget(for selector: Selector!) -> Any? {
+        MainActor.assumeIsolated { previous }
     }
 }

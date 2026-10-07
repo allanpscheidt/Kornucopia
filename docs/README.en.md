@@ -4,14 +4,16 @@ Kornucopia is a local Kanban app with sticky notes for Mac with Apple Silicon an
 
 **[Download the latest release](https://github.com/allanpscheidt/Kornucopia/releases/latest)** · [Português brasileiro](../README.md)
 
-## Version 1.0.1
+## Version 1.0.2
 
 - Practical tutorials in every column.
 - Interface in Brazilian Portuguese, English, Spanish, French and Japanese.
 - Language selection saved in Settings. Your notes keep their original text.
 - Mac arm64 and portable Windows x64 and ARM64 packages.
 
-Doing starts with a limit of two cards. A popup blocks additional work when the limit is reached. Finish a task and move it to Review before starting another. You can increase the limit in Settings. The other columns have no artificial card limit.
+Doing starts with a limit of two cards. A popup blocks additional work when the limit is reached. Finish a task and move it to Review before starting another. You can increase the limit in Settings. The board accepts up to 10,000 notes within its safety budget. Windows shows 100 notes per column page; search includes every page.
+
+Version 1.0.2 checks regular files and byte length before reading the primary board and backup. The shared limits are 16 MiB of JSON and 8 MiB of total UTF-8 text, with smaller limits per field. Rejected files are preserved safely when possible; the app tries the backup and warns you. Rejected edits remain in the open editor and can be copied before closing. See the [complete limits](../README.md#salvamento-e-recuperação).
 
 ## Install and use
 

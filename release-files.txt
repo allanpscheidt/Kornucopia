@@ -6,6 +6,7 @@ docs/README.es.md
 docs/README.fr.md
 docs/README.ja.md
 docs/release-1.0.1.pt-BR.md
+docs/release-1.0.2.pt-BR.md
 CHANGELOG.md
 SECURITY.md
 CONTRIBUTING.md

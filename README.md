@@ -8,8 +8,12 @@ Kornucopia organiza seu trabalho em um quadro Kanban com notas autoadesivas. Cad
 
 **[Baixar a versão mais recente](https://github.com/allanpscheidt/Kornucopia/releases/latest)**
 
-## Versão 1.0.1
+## Versão 1.0.2
 
+- Proteção contra quadros que exigem memória ou processamento excessivos, antes da leitura e da montagem dos cartões.
+- Recuperação de arquivos recusados, com aviso e preservação segura quando possível.
+- Windows mostra até 100 notas por página em cada coluna; a busca consulta o quadro inteiro.
+- O editor preserva textos recusados e permite copiá-los antes de fechar.
 - Tutorial prático em cada coluna, com ações e orientação para avançar.
 - Interface em português brasileiro, inglês, espanhol, francês e japonês.
 - Escolha de idioma nas configurações, preservada entre sessões.
@@ -28,7 +32,7 @@ Cada coluna tem sua própria cor. O cartão muda de cor quando você o move.
 | Revisão | Confira o resultado, corrija os detalhes e reúna feedback. | Roxo |
 | Feito | Registre o trabalho concluído e o que você aprende com ele. | Verde |
 
-Backlog, Revisão e Feito aceitam cartões sem um limite artificial de quantidade. Cada coluna tem rolagem independente. A capacidade prática acompanha a memória e o armazenamento disponíveis no computador.
+Backlog, Revisão e Feito aceitam muitas notas dentro dos limites de proteção do quadro. Cada coluna tem rolagem independente. No Windows, colunas com mais de 100 resultados exibem navegação por páginas. A busca inclui todas as páginas.
 
 Fazendo começa com espaço para **dois cartões ao mesmo tempo**. Esse limite de WIP, ou trabalho em progresso, ajuda a concentrar a produção. Ao atingir o número configurado, o app bloqueia a entrada de outro cartão e mostra um alerta. A ideia nova pode esperar no Backlog enquanto você termina algo e o move para Revisão.
 
@@ -40,9 +44,9 @@ Escolha o pacote que corresponde ao seu computador na [página de releases](http
 
 | Computador | Pacote | Requisito |
 | --- | --- | --- |
-| Mac com Apple Silicon | `Kornucopia-v1.0.1-macOS-arm64.zip` | M1 ou posterior, macOS 14 ou posterior |
-| PC com processador x64 | `Kornucopia-1.0.1-windows-x64.zip` | Windows 11 |
-| PC com processador ARM64 | `Kornucopia-1.0.1-windows-arm64.zip` | Windows 11 ARM64 |
+| Mac com Apple Silicon | `Kornucopia-v1.0.2-macOS-arm64.zip` | M1 ou posterior, macOS 14 ou posterior |
+| PC com processador x64 | `Kornucopia-1.0.2-windows-x64.zip` | Windows 11 |
+| PC com processador ARM64 | `Kornucopia-1.0.2-windows-arm64.zip` | Windows 11 ARM64 |
 
 ### Mac
 
@@ -62,7 +66,7 @@ O pacote usa assinatura ad hoc local, sem certificado Developer ID ou notarizaç
 
 O pacote inclui o runtime necessário e funciona sem instalar o .NET separadamente. A distribuição atual não possui assinatura Authenticode. O Windows pode exibir um aviso sobre o editor. Confira a origem do download e preserve as proteções do sistema.
 
-Cada pacote acompanha um arquivo `SHA256SUMS`. No Mac, use `shasum -a 256 -c SHA256SUMS.txt` na pasta do ZIP. No Windows, execute `Get-FileHash .\Kornucopia-1.0.1-windows-x64.zip -Algorithm SHA256` no PowerShell, ajustando o nome para ARM64 quando necessário. Compare o resultado com o arquivo de soma correspondente.
+Cada pacote acompanha um arquivo `SHA256SUMS`. No Mac, use `shasum -a 256 -c SHA256SUMS.txt` na pasta do ZIP. No Windows, execute `Get-FileHash .\Kornucopia-1.0.2-windows-x64.zip -Algorithm SHA256` no PowerShell, ajustando o nome para ARM64 quando necessário. Compare o resultado com o arquivo de soma correspondente.
 
 ## Como usar
 
@@ -90,7 +94,24 @@ O histórico guarda até 100 etapas durante a execução. Ao reabrir, o app rest
 | macOS | `~/Library/Application Support/Kornucopia/` |
 | Windows | `%LOCALAPPDATA%\Kornucopia\` |
 
-Cada alteração grava `board.json` de forma atômica. `board.backup.json` guarda o estado imediatamente anterior. Se o arquivo principal ficar ilegível, o app tenta recuperar a cópia e avisa você. Arquivos corrompidos que consegue preservar recebem `.corrupt-` no nome.
+Cada alteração grava `board.json` de forma atômica. `board.backup.json` guarda o estado imediatamente anterior. Se o arquivo principal ficar ilegível ou ultrapassar os limites de proteção, o app tenta recuperar a cópia e avisa você. Arquivos recusados que consegue preservar recebem `.corrupt-` no nome. Esses arquivos ficam fora da próxima leitura automática.
+
+As duas plataformas usam os mesmos limites, inclusive para o backup e para a transferência manual de quadros:
+
+| Recurso | Limite por quadro |
+| --- | --- |
+| Arquivo JSON | 16 MiB |
+| Notas | 10.000 |
+| Nome do quadro | 1 KiB de texto UTF-8 |
+| Título de cada nota | 4 KiB de texto UTF-8 |
+| Anotações de cada nota | 256 KiB de texto UTF-8 |
+| Soma do nome, títulos e anotações | 8 MiB de texto UTF-8 |
+| Profundidade do JSON | 32 níveis |
+| Trabalho de leitura do JSON | 250.000 tokens |
+
+MiB e KiB medem bytes. O número de caracteres depende do idioma e dos símbolos usados. Uma edição acima desses limites mantém o último estado aceito, mostra um aviso e conserva o rascunho no editor aberto. Ao fechar, você pode copiar esse rascunho. O app recusa links e arquivos especiais, e pausa o salvamento se o arquivo principal mudar fora da sessão. Guarde qualquer texto pendente antes de reabrir nessa situação.
+
+No Windows, `preferences.json` aceita até 64 KiB, com profundidade de 8 níveis e até 512 tokens JSON. A busca salva nas preferências aceita 4 KiB de texto UTF-8. Esse arquivo também passa pela leitura limitada e pela verificação de arquivo regular.
 
 Uma falha de escrita aparece com a opção de tentar salvar novamente. Ao encerrar com alterações pendentes, o app oferece manter a sessão aberta. Para preservar versões antigas, inclua a pasta de dados em seu backup habitual.
 

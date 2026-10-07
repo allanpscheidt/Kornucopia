@@ -6,6 +6,8 @@ A interface acompanha o idioma do sistema, com escolha persistente em Configura�
 
 Os dados ficam em `%LOCALAPPDATA%\Kornucopia`: `board.json`, `board.backup.json` e `preferences.json`. O formato do quadro conserva o esquema e os identificadores usados pelo app macOS. Datas numéricas usam a época de 1 de janeiro de 2001. A transferência entre plataformas é manual; o app não envia dados pela rede. Os arquivos locais não têm criptografia própria.
 
+Na versão 1.0.2, cada coluna mostra até 100 notas por página. A busca considera todas as notas aceitas, inclusive as outras páginas. O carregamento confere arquivo regular, tamanho e orçamento do JSON antes de construir o quadro. O principal e o backup seguem os [limites compartilhados](../README.md#salvamento-e-recuperação). Arquivos recusados são preservados quando possível, e o app avisa sobre a recuperação. O editor conserva textos acima do orçamento e permite copiá-los antes de fechar.
+
 O pacote não tem assinatura Authenticode. Windows e SmartScreen podem exibir avisos de editor desconhecido. A conferência do SHA-256 permite detectar alterações em relação ao arquivo publicado; o checksum não autentica a identidade do editor. Não desative proteções do Windows para abrir o app.
 
 ## Compilar

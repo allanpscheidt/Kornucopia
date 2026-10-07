@@ -4,14 +4,16 @@ Kornucopia organise votre travail sur un tableau Kanban avec des notes adhésive
 
 **[Télécharger la dernière version](https://github.com/allanpscheidt/Kornucopia/releases/latest)** · [Português brasileiro](../README.md)
 
-## Version 1.0.1
+## Version 1.0.2
 
 - Tutoriels pratiques dans les quatre colonnes.
 - Interface en portugais brésilien, anglais, espagnol, français et japonais.
 - Choix de langue conservé dans les réglages. Vos notes gardent leur texte d'origine.
 - Paquets Mac arm64 et Windows x64 et ARM64.
 
-En cours commence avec une limite de deux cartes. Une alerte bloque l'ajout d'une carte lorsque la limite est atteinte. Terminez une tâche et déplacez-la vers Révision avant d'en commencer une autre. Vous pouvez augmenter la limite dans les réglages. Les autres colonnes acceptent des cartes sans limite artificielle.
+En cours commence avec une limite de deux cartes. Une alerte bloque l'ajout d'une carte lorsque la limite est atteinte. Terminez une tâche et déplacez-la vers Révision avant d'en commencer une autre. Vous pouvez augmenter la limite dans les réglages. Le tableau accepte jusqu’à 10 000 notes dans son budget de sécurité. Windows affiche 100 notes par page de chaque colonne ; la recherche inclut toutes les pages.
+
+La version 1.0.2 vérifie le type et la taille du fichier avant de lire le tableau principal et sa sauvegarde. Les limites communes sont de 16 Mio de JSON et de 8 Mio de texte UTF-8 au total, avec des limites plus petites par champ. Les fichiers refusés sont préservés en sécurité lorsque cela est possible ; l’app tente la sauvegarde et affiche un avertissement. Les textes refusés restent dans l’éditeur ouvert et peuvent être copiés avant de fermer. Consultez les [limites complètes](../README.md#salvamento-e-recuperação).
 
 ## Installation et utilisation
 

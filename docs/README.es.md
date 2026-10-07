@@ -4,14 +4,16 @@ Kornucopia organiza tu trabajo en un tablero Kanban con notas adhesivas para Mac
 
 **[Descargar la versión más reciente](https://github.com/allanpscheidt/Kornucopia/releases/latest)** · [Português brasileiro](../README.md)
 
-## Versión 1.0.1
+## Versión 1.0.2
 
 - Tutoriales prácticos en las cuatro columnas.
 - Interfaz en portugués brasileño, inglés, español, francés y japonés.
 - Selección de idioma guardada en Configuración. Tus notas conservan su texto original.
 - Paquetes para Mac arm64 y Windows x64 y ARM64.
 
-En curso comienza con un límite de dos tarjetas. Una alerta bloquea la entrada de otra cuando se alcanza el límite. Termina una tarea y muévela a Revisión antes de empezar otra. Puedes aumentar el límite en Configuración. Las demás columnas admiten tarjetas sin un límite artificial.
+En curso comienza con un límite de dos tarjetas. Una alerta bloquea la entrada de otra cuando se alcanza el límite. Termina una tarea y muévela a Revisión antes de empezar otra. Puedes aumentar el límite en Configuración. El tablero acepta hasta 10.000 notas dentro de su presupuesto de seguridad. Windows muestra 100 notas por página de cada columna; la búsqueda incluye todas las páginas.
+
+La versión 1.0.2 comprueba el tipo de archivo y su tamaño antes de leer el tablero principal y la copia de seguridad. Los límites compartidos son 16 MiB de JSON y 8 MiB de texto UTF-8 total, con límites menores por campo. Conserva los archivos rechazados de forma segura cuando puede, intenta la copia de seguridad y muestra un aviso. Los textos rechazados permanecen en el editor abierto y pueden copiarse antes de cerrar. Consulta los [límites completos](../README.md#salvamento-e-recuperação).
 
 ## Instalar y usar
 

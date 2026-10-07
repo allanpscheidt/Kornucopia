@@ -80,6 +80,9 @@ final class KanbanAppDelegate: NSObject, NSApplicationDelegate {
             })
         }
         scheduleMenuRefresh()
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .kanbanReady, object: nil)
+        }
     }
     private func scheduleMenuRefresh() {
         guard !menuRefreshPending else { return }
@@ -93,6 +96,7 @@ final class KanbanAppDelegate: NSObject, NSApplicationDelegate {
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard PendingEditorDraft.permitsClosing() else { return .terminateCancel }
         guard let store, !store.flush() else { return .terminateNow }
         let alert = NSAlert()
         alert.messageText = L("error.terminationTitle")
@@ -105,6 +109,7 @@ final class KanbanAppDelegate: NSObject, NSApplicationDelegate {
 }
 
 extension Notification.Name {
+    static let kanbanReady = Notification.Name("kanban.ready")
     static let kanbanOpenSettings = Notification.Name("kanban.settings")
     static let kanbanNewCard = Notification.Name("kanban.newCard")
     static let kanbanFocusSearch = Notification.Name("kanban.focusSearch")
