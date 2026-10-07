@@ -105,7 +105,7 @@ try
     Check(hardStore.Snapshot.Cards.Count == 0 && hardStore.RecoveryErrorKey == "error.storageFileType" && hardStore.Create() is not null && File.ReadAllBytes(outside).SequenceEqual(outsideBytes), "Hard-link alias is preserved without modifying the other user's bytes");
     var directoryAlias = Folder("nonregular-directory"); var reservedDirectory = Path.Combine(directoryAlias, "board.json"); Directory.CreateDirectory(reservedDirectory); var marker = Path.Combine(reservedDirectory, "preserve.txt"); File.WriteAllText(marker, "owned fixture"); var directoryStore = new BoardStore(directoryAlias);
     Check(directoryStore.Create() is not null && !directoryStore.Flush() && directoryStore.SaveErrorKey == "error.storageFileType" && File.ReadAllText(marker) == "owned fixture" && Directory.Exists(reservedDirectory), "Directory at reserved file path is neither read nor renamed or overwritten");
-    var realRoot = Folder("root-link-target"); var linkedRoot = Path.Combine(root, "linked-data-root"); File.WriteAllBytes(Path.Combine(realRoot, "board.json"), outsideBytes); Directory.CreateSymbolicLink(linkedRoot, realRoot); var rootLinkStore = new BoardStore(linkedRoot);
+    var realRoot = Folder("root-link-target"); var linkedRoot = Path.Combine(root, "linked-data-root"); File.WriteAllBytes(Path.Combine(realRoot, "board.json"), outsideBytes); NativeTests.DirectorySymbolicLink(linkedRoot, realRoot); var rootLinkStore = new BoardStore(linkedRoot);
     Check(rootLinkStore.Snapshot.Cards.Count == 0 && !rootLinkStore.Flush() && rootLinkStore.SaveErrorKey == "error.storageUnsafeRoot" && File.ReadAllBytes(Path.Combine(realRoot, "board.json")).SequenceEqual(outsideBytes), "A symbolic data root cannot redirect reads, quarantine or writes");
     if (!OperatingSystem.IsWindows())
     {
@@ -238,12 +238,43 @@ try
     Check(!disclosed && File.ReadAllBytes(outside).SequenceEqual(outsideBytes), "Concurrent leaf swaps never decode a linked private board or copy its bytes into a backup");
     var switchedRoot = Folder("root-switch-link"); var switchedStore = new BoardStore(switchedRoot); switchedStore.Create(); Directory.Move(switchedRoot, switchedRoot + "-retained"); NativeTests.DirectoryLink(switchedRoot, parentChild);
     Check(!switchedStore.Flush() && switchedStore.SaveErrorKey == "error.storageUnsafeRoot" && File.ReadAllBytes(Path.Combine(parentChild, "board.json")).SequenceEqual(outsideBytes) && Directory.GetFiles(parentChild).Length == 2, "Replacing a loaded root with a link or junction cannot access or mutate the target");
+    NativeTests.RemoveDirectoryLinks(root);
+    Check(File.ReadAllBytes(Path.Combine(parentChild, "board.json")).SequenceEqual(outsideBytes) && File.ReadAllBytes(Path.Combine(realRoot, "board.json")).SequenceEqual(outsideBytes) && Directory.GetFiles(parentChild).Length == 2, "Removing fixture links deletes only their entries and preserves every target");
     Console.WriteLine($"PASS: {passed} checks; isolated temporary data only.");
 }
-finally { Directory.Delete(root, true); }
+finally { NativeTests.RemoveDirectoryLinks(root); Directory.Delete(root, true); }
 
 static class NativeTests
 {
+    static readonly List<string> directoryLinks = [];
+    public static void DirectorySymbolicLink(string path, string target)
+    {
+        Directory.CreateSymbolicLink(path, target); directoryLinks.Add(Path.GetFullPath(path)); ValidateDirectoryLink(path, target);
+    }
+    static void ValidateDirectoryLink(string path, string target)
+    {
+        // LinkTarget reads the reparse payload itself, without resolving the target.
+        var link = new DirectoryInfo(path); var immediateTarget = link.LinkTarget;
+        var resolvedTarget = link.ResolveLinkTarget(false)?.FullName;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0 || immediateTarget is null || !Path.GetFullPath(immediateTarget).Equals(Path.GetFullPath(target), comparison) || resolvedTarget is null || !resolvedTarget.Equals(Path.GetFullPath(target), comparison) || !Directory.Exists(path))
+            throw new IOException("The isolated directory link does not point to its intended fixture.");
+    }
+    public static void RemoveDirectoryLinks(string root)
+    {
+        var prefix = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root)) + Path.DirectorySeparatorChar;
+        for (var index = directoryLinks.Count - 1; index >= 0; index--)
+        {
+            var path = directoryLinks[index];
+            if (!path.StartsWith(prefix, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal) || (File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0)
+                throw new IOException("The isolated fixture link changed before cleanup.");
+            // Recursive Directory.Delete treats junctions as volume mount points.
+            // Delete the link entry directly, before walking any real fixture data.
+            if (OperatingSystem.IsWindows()) Directory.Delete(path, false);
+            else File.Delete(path);
+            directoryLinks.RemoveAt(index);
+        }
+    }
     public static void HardLink(string path, string target)
     {
         if (OperatingSystem.IsWindows() ? !CreateHardLink(path, target, IntPtr.Zero) : Link(target, path) != 0) throw new IOException("Unable to create isolated hard-link fixture.");
@@ -257,11 +288,12 @@ static class NativeTests
     [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)] static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
     public static void DirectoryLink(string path, string target)
     {
-        if (!OperatingSystem.IsWindows()) { Directory.CreateSymbolicLink(path, target); return; }
+        if (!OperatingSystem.IsWindows()) { DirectorySymbolicLink(path, target); return; }
         var start = new ProcessStartInfo("cmd.exe") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var argument in new[] { "/d", "/c", "mklink", "/J", path, target }) start.ArgumentList.Add(argument);
         using var process = Process.Start(start) ?? throw new IOException("Unable to create isolated junction fixture.");
         process.WaitForExit(); if (process.ExitCode != 0) throw new IOException("Unable to create isolated junction fixture.");
+        directoryLinks.Add(Path.GetFullPath(path)); ValidateDirectoryLink(path, target);
     }
     public static void Fifo(string path) { if (MkFifo(path, 0x180) != 0) throw new IOException("Unable to create isolated FIFO fixture."); }
     [DllImport("kernel32.dll", EntryPoint = "CreateHardLinkW", CharSet = CharSet.Unicode, SetLastError = true)]
