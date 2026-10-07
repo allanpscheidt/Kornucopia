@@ -11,6 +11,7 @@ private enum BoardSheet: Identifiable {
 
 struct BoardView: View {
     @ObservedObject var store: BoardStore
+    @ObservedObject private var localization = AppLocalization.shared
     @State private var query = ""
     @State private var sheet: BoardSheet?
     @State private var restoredSession = false
@@ -41,6 +42,9 @@ struct BoardView: View {
         .onReceive(NotificationCenter.default.publisher(for: .kanbanNewCard)) { _ in
             if sheet == nil { create(in: .backlog) }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .kanbanOpenSettings)) { _ in
+            if sheet == nil { sheet = .settings }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .kanbanFocusSearch)) { _ in
             if sheet == nil { searchFocused = true }
         }
@@ -49,17 +53,17 @@ struct BoardView: View {
             restoredSession = true
             if let message = store.recoveryMessage {
                 let alert = NSAlert()
-                alert.messageText = "Recuperação do quadro"
+                alert.messageText = L("recovery.title")
                 alert.informativeText = message
-                alert.addButton(withTitle: "Entendi")
+                alert.addButton(withTitle: L("action.understood"))
                 alert.runModal()
             }
-            if let value = UserDefaults.standard.string(forKey: sessionKey),
+            if let value = AppPreferences.defaults.string(forKey: sessionKey),
                let id = UUID(uuidString: value), store.card(id: id) != nil { sheet = .card(id) }
         }
         .onChange(of: sheet?.id) { _, _ in
-            if case .card(let id) = sheet { UserDefaults.standard.set(id.uuidString, forKey: sessionKey) }
-            else { UserDefaults.standard.removeObject(forKey: sessionKey) }
+            if case .card(let id) = sheet { AppPreferences.defaults.set(id.uuidString, forKey: sessionKey) }
+            else { AppPreferences.defaults.removeObject(forKey: sessionKey) }
         }
         .sheet(item: $sheet) { item in
             switch item {
@@ -71,10 +75,10 @@ struct BoardView: View {
             guard show else { return }
             store.wipAlert = false
             let alert = NSAlert()
-            alert.messageText = "Limite de trabalho em progresso"
-            alert.informativeText = "Fazendo já tem \(store.snapshot.wipLimit) cartões, o limite atual.\n\nConclua um cartão e mova-o para Revisão antes de começar outro. Guarde novas ideias no Backlog.\n\nVocê pode aumentar o limite nas Configurações."
+            alert.messageText = L("wip.title")
+            alert.informativeText = L("wip.body", ["limit": String(store.snapshot.wipLimit)])
             alert.alertStyle = .warning
-            alert.addButton(withTitle: "Entendi")
+            alert.addButton(withTitle: L("action.understood"))
             alert.runModal()
         }
     }
@@ -82,10 +86,10 @@ struct BoardView: View {
     private var topStrip: some View {
         HStack(spacing: 8) {
             Image(nsImage: Theme.logo).resizable().scaledToFit().frame(width: 25, height: 25).accessibilityHidden(true)
-            Text("KORNUCOPIA").tracking(2).fontWeight(.semibold)
+            Text(L("app.name").uppercased()).tracking(2).fontWeight(.semibold)
             Spacer()
             Image(systemName: "lock").accessibilityHidden(true)
-            Text("Acesso local")
+            Text(L("board.localAccess"))
         }
         .font(.system(size: 11)).foregroundStyle(Color.white.opacity(0.9))
         .padding(.horizontal, 28).frame(height: 38).background(Theme.night)
@@ -94,35 +98,35 @@ struct BoardView: View {
     private var header: some View {
         HStack(alignment: .center, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("ORGANIZAÇÃO PESSOAL").font(.system(size: 10, weight: .bold))
+                Text(L("board.personalTitle")).font(.system(size: 10, weight: .bold))
                     .tracking(1.5).foregroundStyle(Theme.accent)
                 Text(store.snapshot.boardTitle).font(.system(size: 30, weight: .bold))
                     .tracking(-0.7).foregroundStyle(Theme.strong).lineLimit(1).help(store.snapshot.boardTitle)
-                Text("Ideias, produção, revisão e trabalho concluído.")
+                Text(L("board.summary"))
                     .font(.system(size: 13)).foregroundStyle(Theme.secondary)
             }
             Spacer(minLength: 12)
             HStack(spacing: 9) {
                 Image(systemName: "magnifyingglass").foregroundStyle(Theme.secondary).accessibilityHidden(true)
-                TextField("Buscar cartões", text: $query).textFieldStyle(.plain)
-                    .focused($searchFocused).accessibilityLabel("Buscar cartões")
+                TextField(L("board.search"), text: $query).textFieldStyle(.plain)
+                    .focused($searchFocused).accessibilityLabel(L("board.search"))
                 if !query.isEmpty {
                     Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }
-                        .buttonStyle(.plain).accessibilityLabel("Limpar busca")
+                        .buttonStyle(.plain).accessibilityLabel(L("board.clearSearch"))
                 }
             }
             .font(.system(size: 13)).padding(12).frame(width: 218)
             .background(Color.white, in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(searchFocused ? Theme.accent : Theme.line, lineWidth: searchFocused ? 2 : 1))
             Button { create(in: .backlog) } label: {
-                Label("Novo cartão", systemImage: "plus").font(.system(size: 13, weight: .semibold))
+                Label(L("action.newCard"), systemImage: "plus").font(.system(size: 13, weight: .semibold))
                     .padding(.horizontal, 16).frame(height: 42)
             }
-            .buttonStyle(PrimaryButtonStyle()).help("Novo cartão no Backlog (⌘N)")
+            .buttonStyle(PrimaryButtonStyle()).help(L("board.newBacklogHint"))
             Button { sheet = .settings } label: {
                 Image(systemName: "gearshape").font(.system(size: 17)).frame(width: 42, height: 42)
             }
-            .buttonStyle(QuietButtonStyle()).accessibilityLabel("Configurações").help("Configurações do quadro")
+            .buttonStyle(QuietButtonStyle()).accessibilityLabel(L("settings.title")).help(L("board.settingsHint"))
         }
         .padding(.horizontal, 28).padding(.vertical, 26)
     }
@@ -133,14 +137,14 @@ struct BoardView: View {
                 .accessibilityHidden(true)
             if let error = store.saveError {
                 Text(error).lineLimit(2)
-                Button("Tentar salvar") { _ = store.flush() }.buttonStyle(.borderless)
+                Button(L("action.retrySave")) { _ = store.flush() }.buttonStyle(.borderless)
             } else {
-                Text("Salvo no Mac")
+                Text(L("board.saved"))
             }
             Spacer()
-            Text("\(store.snapshot.cards.count) \(store.snapshot.cards.count == 1 ? "cartão" : "cartões")")
+            Text(localization.cardCount(store.snapshot.cards.count))
             Rectangle().fill(Theme.line).frame(width: 1, height: 12).padding(.horizontal, 6)
-            Button("Limite em Fazendo: \(store.snapshot.wipLimit)") { sheet = .settings }
+            Button(L("board.doingLimit", ["limit": String(store.snapshot.wipLimit)])) { sheet = .settings }
                 .buttonStyle(.plain).foregroundStyle(Theme.strong)
         }
         .font(.system(size: 11)).foregroundStyle(store.saveError == nil ? Theme.secondary : Theme.warning)
@@ -155,11 +159,13 @@ struct BoardView: View {
 
 private struct ColumnView: View {
     @ObservedObject var store: BoardStore
+    @ObservedObject private var localization = AppLocalization.shared
     let column: KanbanColumn
     let query: String
     let openCard: (UUID) -> Void
     let addCard: () -> Void
     @State private var isTargeted = false
+    @State private var tutorialExpanded = true
 
     private var visibleCards: [KanbanCard] { store.cards(in: column, query: query) }
     private var count: Int { store.cards(in: column, query: "").count }
@@ -177,13 +183,34 @@ private struct ColumnView: View {
                         .foregroundStyle(isFull ? Theme.warning : Theme.secondary)
                         .padding(.horizontal, 8).padding(.vertical, 4)
                         .background(isFull ? Color(hex: 0xFAEBD4) : Color.white.opacity(0.75), in: Capsule())
-                        .accessibilityLabel(column == .doing ? "\(count) \(count == 1 ? "cartão" : "cartões") de um limite de \(store.snapshot.wipLimit)" : "\(count) \(count == 1 ? "cartão" : "cartões")")
+                        .accessibilityLabel(column == .doing ? L("a11y.doingCount", ["count": String(count), "limit": String(store.snapshot.wipLimit)]) : localization.cardCount(count))
                     Button(action: addCard) { Image(systemName: "plus").frame(width: 28, height: 28) }
                         .buttonStyle(.plain).foregroundStyle(Theme.secondary)
-                        .accessibilityLabel("Adicionar cartão em \(column.title)")
-                        .help("Adicionar cartão em \(column.title)")
+                        .accessibilityLabel(L("a11y.addColumnCard", ["column": column.title]))
+                        .help(L("a11y.addColumnCard", ["column": column.title]))
                 }
                 Text(column.subtitle).font(.system(size: 11)).foregroundStyle(Theme.secondary)
+                DisclosureGroup(isExpanded: $tutorialExpanded) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(L("column." + column.rawValue + ".tutorial.title"))
+                            .font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.strong)
+                        ForEach(1...3, id: \.self) { step in
+                            HStack(alignment: .top, spacing: 7) {
+                                Text(String(step) + ".").fontWeight(.semibold)
+                                Text(L("column." + column.rawValue + ".tutorial.step" + String(step),
+                                       ["limit": String(store.snapshot.wipLimit)]))
+                            }
+                        }
+                        Text(L("column." + column.rawValue + ".tutorial.next"))
+                            .fontWeight(.medium).foregroundStyle(Theme.strong)
+                    }
+                    .font(.system(size: 11)).fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 8)
+                } label: {
+                    Label(L("tutorial.toggle"), systemImage: "questionmark.circle")
+                        .font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.strong)
+                }
+                .padding(.top, 6)
             }
             .padding(16)
             Rectangle().fill(Theme.line.opacity(0.7)).frame(height: 1).padding(.horizontal, 16)
@@ -199,21 +226,21 @@ private struct ColumnView: View {
                         VStack(spacing: 12) {
                             Image(systemName: query.isEmpty ? column.emptySymbol : "magnifyingglass")
                                 .font(.system(size: 24, weight: .light)).foregroundStyle(column.dot).accessibilityHidden(true)
-                            Text(query.isEmpty ? column.emptyTitle : "Nenhum cartão encontrado")
+                            Text(query.isEmpty ? column.emptyTitle : L("board.noResults"))
                                 .font(.system(size: 13, weight: .medium)).multilineTextAlignment(.center)
-                            Text(query.isEmpty ? (column == .doing ? "Trabalhe em até \(store.snapshot.wipLimit) \(store.snapshot.wipLimit == 1 ? "cartão" : "cartões") por vez." : column.emptyHelp) : "Tente buscar outra palavra.")
+                            Text(query.isEmpty ? (column == .doing ? L("column.doing.emptyHelp", ["limit": String(store.snapshot.wipLimit)]) : column.emptyHelp) : L("board.searchAgain"))
                                 .font(.system(size: 11)).foregroundStyle(Theme.secondary).multilineTextAlignment(.center)
                         }
                         .frame(maxWidth: .infinity).padding(.horizontal, 12).padding(.vertical, 40)
                     }
                     Button(action: addCard) {
-                        Label("Adicionar cartão", systemImage: "plus").font(.system(size: 12))
+                        Label(L("action.addCard"), systemImage: "plus").font(.system(size: 12))
                             .frame(maxWidth: .infinity, alignment: .leading).padding(13)
                     }
                     .buttonStyle(.plain).foregroundStyle(Theme.secondary)
                     .background(Color.white.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
                     .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.line, style: StrokeStyle(lineWidth: 1, dash: [4, 4])))
-                    .accessibilityLabel("Novo cartão na coluna \(column.title)")
+                    .accessibilityLabel(L("a11y.newColumnCard", ["column": column.title]))
                     Color.clear.frame(height: 28).accessibilityHidden(true)
                 }
                 .padding(14).frame(maxWidth: .infinity)
@@ -226,6 +253,10 @@ private struct ColumnView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.column.opacity(0.65), in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(isTargeted ? Theme.accent : Theme.line.opacity(0.65), lineWidth: isTargeted ? 2 : 1))
+        .onAppear { tutorialExpanded = AppPreferences.tutorialExpanded(for: column.rawValue) }
+        .onChange(of: tutorialExpanded) { _, value in
+            AppPreferences.defaults.set(value, forKey: "tutorial." + column.rawValue)
+        }
     }
 }
 
@@ -233,6 +264,7 @@ private struct StickyCard: View {
     let card: KanbanCard
     let open: () -> Void
     @ObservedObject var store: BoardStore
+    @ObservedObject private var localization = AppLocalization.shared
     @State private var hover = false
 
     var body: some View {
@@ -242,7 +274,7 @@ private struct StickyCard: View {
                     Spacer()
                     Image(systemName: "ellipsis").font(.system(size: 14)).foregroundStyle(Theme.ink.opacity(0.6))
                 }.accessibilityHidden(true)
-                Text(card.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Sem título" : card.title)
+                Text(card.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? L("card.untitled") : card.title)
                     .font(.system(size: 15, weight: .semibold)).lineLimit(4)
                     .multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
                 if !card.notes.isEmpty {
@@ -269,22 +301,22 @@ private struct StickyCard: View {
         .onKeyPress(.space) { open(); return .handled }
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { open() }
-        .accessibilityLabel("\(card.title.isEmpty ? "Sem título" : card.title), \(card.column.title)")
-        .accessibilityHint("Abre o cartão para editar. Também pode ser arrastado para outra coluna.")
-        .help("Clique para editar. Arraste para mover. Clique com o botão direito para mais opções.")
+        .accessibilityLabel(L("a11y.cardLabel", ["title": card.title.isEmpty ? L("card.untitled") : card.title, "column": card.column.title]))
+        .accessibilityHint(L("a11y.cardOpenHint"))
+        .help(L("a11y.cardUsageHint"))
         .contextMenu {
-            Button("Editar cartão", action: open)
-            Menu("Mover para") {
+            Button(L("menu.editCard"), action: open)
+            Menu(L("menu.moveTo")) {
                 ForEach(KanbanColumn.allCases.filter { $0 != card.column }, id: \.self) { column in
                     Button(column.title) { _ = store.moveCard(id: card.id, to: column, before: nil) }
                 }
             }
-            Button("Mover para o início da coluna") {
+            Button(L("menu.moveFirst")) {
                 _ = store.moveCard(id: card.id, to: card.column, before: store.cards(in: card.column, query: "").first?.id)
             }
-            Button("Mover para o fim da coluna") { _ = store.moveCard(id: card.id, to: card.column, before: nil) }
+            Button(L("menu.moveLast")) { _ = store.moveCard(id: card.id, to: card.column, before: nil) }
             Divider()
-            Button("Excluir cartão", role: .destructive) { _ = store.deleteCard(id: card.id) }
+            Button(L("action.deleteCard"), role: .destructive) { _ = store.deleteCard(id: card.id) }
         }
     }
 }
@@ -330,7 +362,7 @@ private struct WindowConfiguration: NSViewRepresentable {
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             guard let window else { return }
-            window.setFrameAutosaveName("KornucopiaBoard")
+            window.setFrameAutosaveName(AppPreferences.scopeID == "personal" ? "KornucopiaBoard" : "KornucopiaBoard." + AppPreferences.scopeID)
             window.backgroundColor = NSColor(red: 244/255, green: 248/255, blue: 247/255, alpha: 1)
         }
     }

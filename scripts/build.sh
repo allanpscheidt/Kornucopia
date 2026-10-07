@@ -51,6 +51,10 @@ fi
 
 cp "$KORNUCOPIA_ROOT/Resources/AppIcon.icns" "$KORNUCOPIA_STAGED_APP/Contents/Resources/AppIcon.icns"
 cp "$KORNUCOPIA_ROOT/Resources/Cornucopia.png" "$KORNUCOPIA_STAGED_APP/Contents/Resources/Cornucopia.png"
+mkdir -p "$KORNUCOPIA_STAGED_APP/Contents/Resources/Localization"
+for KORNUCOPIA_LANGUAGE in pt-BR en es fr ja; do
+  cp "$KORNUCOPIA_ROOT/Resources/Localization/$KORNUCOPIA_LANGUAGE.json" "$KORNUCOPIA_STAGED_APP/Contents/Resources/Localization/$KORNUCOPIA_LANGUAGE.json"
+done
 KORNUCOPIA_PLIST="$KORNUCOPIA_STAGED_APP/Contents/Info.plist"
 /usr/bin/plutil -create xml1 "$KORNUCOPIA_PLIST"
 /usr/bin/plutil -insert CFBundleDevelopmentRegion -string pt_BR "$KORNUCOPIA_PLIST"
@@ -60,8 +64,9 @@ KORNUCOPIA_PLIST="$KORNUCOPIA_STAGED_APP/Contents/Info.plist"
 /usr/bin/plutil -insert CFBundleName -string Kornucopia "$KORNUCOPIA_PLIST"
 /usr/bin/plutil -insert CFBundleDisplayName -string Kornucopia "$KORNUCOPIA_PLIST"
 /usr/bin/plutil -insert CFBundlePackageType -string APPL "$KORNUCOPIA_PLIST"
-/usr/bin/plutil -insert CFBundleShortVersionString -string 1.0.0 "$KORNUCOPIA_PLIST"
-/usr/bin/plutil -insert CFBundleVersion -string 1 "$KORNUCOPIA_PLIST"
+/usr/bin/plutil -insert CFBundleShortVersionString -string 1.0.1 "$KORNUCOPIA_PLIST"
+/usr/bin/plutil -insert CFBundleVersion -string 2 "$KORNUCOPIA_PLIST"
+/usr/bin/plutil -insert CFBundleLocalizations -json '["pt-BR","en","es","fr","ja"]' "$KORNUCOPIA_PLIST"
 /usr/bin/plutil -insert CFBundleIconFile -string AppIcon "$KORNUCOPIA_PLIST"
 /usr/bin/plutil -insert LSMinimumSystemVersion -string 14.0 "$KORNUCOPIA_PLIST"
 /usr/bin/plutil -insert LSApplicationCategoryType -string public.app-category.productivity "$KORNUCOPIA_PLIST"

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CardEditor: View {
     @ObservedObject var store: BoardStore
+    @ObservedObject private var localization = AppLocalization.shared
     let cardID: UUID
     @Environment(\.dismiss) private var dismiss
     @FocusState private var titleFocused: Bool
@@ -14,80 +15,80 @@ struct CardEditor: View {
             if let card {
                 HStack {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text("CARTÃO").font(.system(size: 10, weight: .bold)).tracking(1.4).foregroundStyle(Theme.strong)
-                        Text("Editar cartão").font(.system(size: 24, weight: .bold)).foregroundStyle(Theme.ink)
+                        Text(L("card.label")).font(.system(size: 10, weight: .bold)).tracking(1.4).foregroundStyle(Theme.strong)
+                        Text(L("menu.editCard")).font(.system(size: 24, weight: .bold)).foregroundStyle(Theme.ink)
                     }
                     Spacer()
                     Button { dismiss() } label: { Image(systemName: "xmark").frame(width: 30, height: 30) }
-                        .buttonStyle(.plain).foregroundStyle(Theme.secondary).accessibilityLabel("Fechar cartão")
+                        .buttonStyle(.plain).foregroundStyle(Theme.secondary).accessibilityLabel(L("a11y.closeCard"))
                 }
                 .padding(24).background(card.color.paper)
                 VStack(alignment: .leading, spacing: 20) {
                     VStack(alignment: .leading, spacing: 8) {
-                        fieldLabel("Título")
-                        TextField("Nome da ideia ou tarefa", text: textBinding(\.title))
+                        fieldLabel(L("card.title"))
+                        TextField(L("card.titlePlaceholder"), text: textBinding(\.title))
                             .font(.system(size: 17, weight: .medium)).textFieldStyle(.plain)
                             .padding(12).background(Theme.canvas, in: RoundedRectangle(cornerRadius: 9))
                             .overlay(RoundedRectangle(cornerRadius: 9).stroke(titleFocused ? Theme.accent : Theme.line, lineWidth: 1))
-                            .focused($titleFocused).accessibilityLabel("Título do cartão")
+                            .focused($titleFocused).accessibilityLabel(L("a11y.cardTitle"))
                     }
                     VStack(alignment: .leading, spacing: 8) {
-                        fieldLabel("Anotações")
+                        fieldLabel(L("card.notes"))
                         TextEditor(text: textBinding(\.notes))
                             .font(.system(size: 13)).lineSpacing(4).scrollContentBackground(.hidden)
                             .padding(8).frame(height: 180).background(Theme.canvas, in: RoundedRectangle(cornerRadius: 9))
                             .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.line, lineWidth: 1))
-                            .accessibilityLabel("Anotações do cartão")
+                            .accessibilityLabel(L("a11y.cardNotes"))
                     }
                     HStack(alignment: .top, spacing: 32) {
                         VStack(alignment: .leading, spacing: 10) {
-                            fieldLabel("Coluna")
-                            Picker("Coluna", selection: Binding(get: { self.card?.column ?? .backlog }, set: { _ = store.updateCard(id: cardID, column: $0) })) {
+                            fieldLabel(L("card.column"))
+                            Picker(L("card.column"), selection: Binding(get: { self.card?.column ?? .backlog }, set: { _ = store.updateCard(id: cardID, column: $0) })) {
                                 ForEach(KanbanColumn.allCases, id: \.self) { Text($0.title).tag($0) }
                             }
                             .labelsHidden().pickerStyle(.menu).frame(width: 180)
-                            .accessibilityLabel("Coluna do cartão")
+                            .accessibilityLabel(L("a11y.cardColumn"))
                         }
                         VStack(alignment: .leading, spacing: 10) {
-                            fieldLabel("Cor da coluna")
+                            fieldLabel(L("card.color"))
                             HStack(spacing: 8) {
                                 Circle().fill(card.color.paper).frame(width: 20, height: 20)
                                     .overlay(Circle().stroke(card.color.mark.opacity(0.6), lineWidth: 1)).accessibilityHidden(true)
                                 Text(card.color.title).font(.system(size: 12))
                             }
-                            Text("A cor acompanha a coluna.").font(.system(size: 10)).foregroundStyle(Theme.secondary)
+                            Text(L("card.colorAutomatic")).font(.system(size: 10)).foregroundStyle(Theme.secondary)
                         }
                     }
                     if let error = store.saveError {
                         Label(error, systemImage: "exclamationmark.triangle")
                             .font(.system(size: 11)).foregroundStyle(Theme.warning).fixedSize(horizontal: false, vertical: true)
                     } else {
-                        Label("Alterações salvas automaticamente", systemImage: "checkmark.circle")
+                        Label(L("card.autosaved"), systemImage: "checkmark.circle")
                             .font(.system(size: 11)).foregroundStyle(Theme.strong)
                     }
                 }
                 .padding(24)
                 Divider()
                 HStack {
-                    Button { showDelete = true } label: { Label("Excluir cartão", systemImage: "trash") }
+                    Button { showDelete = true } label: { Label(L("action.deleteCard"), systemImage: "trash") }
                         .buttonStyle(.borderless).foregroundStyle(Color(hex: 0x98483E)).font(.system(size: 12))
                     Spacer()
                     Button { dismiss() } label: {
-                        Text("Concluído").font(.system(size: 13, weight: .semibold)).padding(.horizontal, 22).frame(height: 38)
+                        Text(L("action.done")).font(.system(size: 13, weight: .semibold)).padding(.horizontal, 22).frame(height: 38)
                     }
                     .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
                 }
                 .padding(.horizontal, 24).padding(.vertical, 16)
             } else {
-                Text("Este cartão foi removido do quadro.").padding(24)
-                Button("Fechar") { dismiss() }.padding(24)
+                Text(L("card.removed")).padding(24)
+                Button(L("action.close")) { dismiss() }.padding(24)
             }
         }
         .frame(width: 570).background(Color.white).foregroundStyle(Theme.ink).tint(Theme.accent)
         .onAppear { titleFocused = true }
-        .confirmationDialog("Excluir este cartão? Você pode recuperar com Desfazer (⌘Z).", isPresented: $showDelete, titleVisibility: .visible) {
-            Button("Excluir cartão", role: .destructive) { _ = store.deleteCard(id: cardID); dismiss() }
-            Button("Cancelar", role: .cancel) {}
+        .confirmationDialog(L("card.deleteConfirmation"), isPresented: $showDelete, titleVisibility: .visible) {
+            Button(L("action.deleteCard"), role: .destructive) { _ = store.deleteCard(id: cardID); dismiss() }
+            Button(L("action.cancel"), role: .cancel) {}
         }
     }
 
@@ -104,6 +105,7 @@ struct CardEditor: View {
 
 struct SettingsView: View {
     @ObservedObject var store: BoardStore
+    @ObservedObject private var localization = AppLocalization.shared
     @Environment(\.dismiss) private var dismiss
     @State private var limitText = ""
     @State private var limitError: String?
@@ -114,55 +116,69 @@ struct SettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             HStack {
-                Text("Configurações").font(.system(size: 24, weight: .bold)).foregroundStyle(Theme.strong)
+                Text(L("settings.title")).font(.system(size: 24, weight: .bold)).foregroundStyle(Theme.strong)
                 Spacer()
                 Button { dismiss() } label: { Image(systemName: "xmark").frame(width: 30, height: 30) }
-                    .buttonStyle(.plain).accessibilityLabel("Fechar configurações")
+                    .buttonStyle(.plain).accessibilityLabel(L("a11y.closeSettings"))
             }
             VStack(alignment: .leading, spacing: 8) {
-                Text("Nome do quadro").font(.system(size: 12, weight: .semibold))
-                TextField("Meu quadro", text: $boardTitleDraft)
-                    .textFieldStyle(.roundedBorder).accessibilityLabel("Nome do quadro")
+                Text(L("settings.boardName")).font(.system(size: 12, weight: .semibold))
+                TextField(L("board.defaultTitle"), text: $boardTitleDraft)
+                    .textFieldStyle(.roundedBorder).accessibilityLabel(L("settings.boardName"))
                     .onChange(of: boardTitleDraft) { _, title in
                         if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { _ = store.setBoardTitle(title) }
                     }
             }
             Divider()
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L("settings.language")).font(.system(size: 12, weight: .semibold))
+                Picker(L("settings.language"), selection: Binding(get: { localization.selection }, set: { localization.select($0) })) {
+                    Text(L("settings.systemLanguage", ["language": localization.systemLanguage.nativeName]))
+                        .tag(AppLocalization.automatic)
+                    ForEach(AppLanguage.allCases) { language in
+                        Text(L("language." + language.rawValue)).tag(language.rawValue)
+                    }
+                }
+                .labelsHidden().pickerStyle(.menu).accessibilityLabel(L("settings.language"))
+                Text(L("settings.languageDescription")).font(.system(size: 11)).foregroundStyle(Theme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Divider()
             VStack(alignment: .leading, spacing: 12) {
-                Text("Limites de WIP").font(.system(size: 17, weight: .bold))
-                Text("WIP significa trabalho em progresso. Escolha quantos cartões podem ficar em Fazendo ao mesmo tempo.")
+                Text(L("settings.wipTitle")).font(.system(size: 17, weight: .bold))
+                Text(L("settings.wipDescription"))
                     .font(.system(size: 13)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 12) {
-                    Text("Máximo em Fazendo").font(.system(size: 13, weight: .medium))
+                    Text(L("settings.wipMaximum")).font(.system(size: 13, weight: .medium))
                     Spacer()
-                    TextField("Limite", text: $limitText)
+                    TextField(L("settings.wipLimit"), text: $limitText)
                         .multilineTextAlignment(.center).textFieldStyle(.roundedBorder).frame(width: 62)
-                        .accessibilityLabel("Número máximo de cartões em Fazendo")
+                        .accessibilityLabel(L("a11y.wipMaximum"))
                         .onChange(of: limitText) { _, value in applyLimit(value) }
-                    Stepper("Ajustar limite", onIncrement: {
+                    Stepper(L("settings.wipAdjust"), onIncrement: {
                         if store.snapshot.wipLimit < Int.max { limitText = String(store.snapshot.wipLimit + 1) }
                     }, onDecrement: {
                         limitText = String(max(minimum, store.snapshot.wipLimit - 1))
-                    }).labelsHidden().accessibilityLabel("Aumentar ou reduzir limite de WIP")
+                    }).labelsHidden().accessibilityLabel(L("a11y.wipAdjust"))
                 }.padding(.vertical, 8)
                 if let limitError {
-                    Text(limitError).font(.system(size: 11)).foregroundStyle(Theme.warning)
+                    Text(L(limitError, ["limit": String(minimum)])).font(.system(size: 11)).foregroundStyle(Theme.warning)
                 }
-                Label("Ao atingir o limite, conclua um cartão e mova-o para Revisão. Novas ideias ficam no Backlog.", systemImage: "info.circle")
+                Label(L("settings.wipTip"), systemImage: "info.circle")
                     .font(.system(size: 12)).foregroundStyle(Theme.strong).fixedSize(horizontal: false, vertical: true)
                     .padding(16).background(Theme.column, in: RoundedRectangle(cornerRadius: 10))
             }
             Divider()
             HStack {
-                Label(store.saveError == nil ? "Salvo automaticamente no Mac" : "Falha ao salvar", systemImage: store.saveError == nil ? "checkmark.circle" : "exclamationmark.triangle")
+                Label(store.saveError == nil ? L("board.autosaved") : L("board.saveFailed"), systemImage: store.saveError == nil ? "checkmark.circle" : "exclamationmark.triangle")
                     .font(.system(size: 11)).foregroundStyle(store.saveError == nil ? Theme.secondary : Theme.warning)
                 Spacer()
                 Button { limitText = String(store.snapshot.wipLimit); dismiss() } label: {
-                    Text("Concluído").font(.system(size: 13, weight: .semibold)).padding(.horizontal, 22).frame(height: 38)
+                    Text(L("action.done")).font(.system(size: 13, weight: .semibold)).padding(.horizontal, 22).frame(height: 38)
                 }.buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
             }
         }
-        .padding(28).frame(width: 520).background(Color.white).foregroundStyle(Theme.ink).tint(Theme.accent)
+        .padding(28).frame(width: 570).background(Color.white).foregroundStyle(Theme.ink).tint(Theme.accent)
         .onAppear { limitText = String(store.snapshot.wipLimit); boardTitleDraft = store.snapshot.boardTitle }
         .onChange(of: store.snapshot.boardTitle) { _, title in
             if boardTitleDraft.trimmingCharacters(in: .whitespacesAndNewlines) != title { boardTitleDraft = title }
@@ -175,10 +191,10 @@ struct SettingsView: View {
 
     private func applyLimit(_ value: String) {
         guard let limit = Int(value), limit >= minimum else {
-            limitError = "Use um número inteiro a partir de \(minimum). O limite deve acomodar os cartões atuais."
+            limitError = "settings.invalidLimit"
             return
         }
-        guard store.setWIPLimit(limit) else { limitError = "Não foi possível alterar o limite."; return }
+        guard store.setWIPLimit(limit) else { limitError = "settings.wipUpdateError"; return }
         limitError = nil
     }
 }

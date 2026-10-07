@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Kornucopia</AssemblyName>
+    <Version>1.0.1</Version>
+    <RuntimeFrameworkVersion>10.0.12</RuntimeFrameworkVersion>
+    <ApplicationIcon>Resources\Cornucopia.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <DebugType>none</DebugType>
+    <PublishTrimmed>false</PublishTrimmed>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="App\**\*.cs" />
+    <ProjectReference Include="Core\Kornucopia.Core.csproj" />
+    <Content Include="..\Resources\Localization\*.json" Link="Resources\Localization\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <Resource Include="..\Resources\Cornucopia.png" Link="Resources\Cornucopia.png" />
+    <Content Include="Resources\RuntimeNotices\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+  </ItemGroup>
+</Project>

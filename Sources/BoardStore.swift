@@ -6,23 +6,8 @@ enum KanbanColumn: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String {
-        switch self {
-        case .backlog: return "Backlog"
-        case .doing: return "Fazendo"
-        case .review: return "Revisão"
-        case .done: return "Feito"
-        }
-    }
-
-    var subtitle: String {
-        switch self {
-        case .backlog: return "Ideias para trabalhar"
-        case .doing: return "Produção ativa"
-        case .review: return "Edição e feedback"
-        case .done: return "Trabalho concluído"
-        }
-    }
+    @MainActor var title: String { L("column." + rawValue + ".title") }
+    @MainActor var subtitle: String { L("column." + rawValue + ".subtitle") }
 
     var noteColor: NoteColor {
         switch self {
@@ -39,15 +24,8 @@ enum NoteColor: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String {
-        switch self {
-        case .yellow: return "Amarelo"
-        case .blue: return "Azul"
-        case .purple: return "Roxo"
-        case .green: return "Verde"
-        case .rose: return "Rosa"
-        }
-    }
+    @MainActor var title: String { L("color." + rawValue) }
+
 }
 
 struct KanbanCard: Identifiable, Codable, Equatable {
@@ -126,7 +104,12 @@ final class BoardStore: ObservableObject {
     private let textEditInterval: TimeInterval = 0.7
     private var undoStack: [BoardSnapshot] = []
     private var redoStack: [BoardSnapshot] = []
-    private var writesBlockedReason: String?
+    private var writesBlockedKey: String?
+    private var writesBlockedDetail = ""
+    private var saveErrorKey: String?
+    private var saveErrorDetail = ""
+    private var recoveryKey: String?
+    private var languageSubscription: AnyCancellable?
     private var lastTextEditCardID: UUID?
     private var lastTextEditUptime: TimeInterval = 0
 
@@ -141,8 +124,11 @@ final class BoardStore: ObservableObject {
             let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             dataDirectory = support.appendingPathComponent("Kornucopia", isDirectory: true)
         }
-        snapshot = BoardSnapshot()
+        snapshot = BoardSnapshot(boardTitle: L("board.defaultTitle"))
         load()
+        languageSubscription = AppLocalization.shared.$language.dropFirst().sink { [weak self] _ in
+            Task { @MainActor [weak self] in self?.refreshLocalizedMessages() }
+        }
     }
 
     func card(id: UUID) -> KanbanCard? {
@@ -236,7 +222,7 @@ final class BoardStore: ObservableObject {
     func setBoardTitle(_ title: String) -> Bool {
         let value = title.trimmingCharacters(in: .whitespacesAndNewlines)
         var next = snapshot
-        next.boardTitle = value.isEmpty ? "Meu quadro" : value
+        next.boardTitle = value.isEmpty ? L("board.defaultTitle") : value
         guard next != snapshot else { return true }
         commit(next)
         return true
@@ -279,8 +265,8 @@ final class BoardStore: ObservableObject {
     /// Saves a full snapshot atomically and preserves the previous valid JSON.
     @discardableResult
     func flush() -> Bool {
-        if let writesBlockedReason {
-            saveError = writesBlockedReason
+        if let writesBlockedKey {
+            setSaveError(writesBlockedKey, detail: writesBlockedDetail)
             return false
         }
         do {
@@ -295,7 +281,7 @@ final class BoardStore: ObservableObject {
                     _ = try decode(previousData)
                 } catch {
                     try preserveUnreadableFile(at: documentURL)
-                    recoveryMessage = "O arquivo anterior apresentou um erro. Guardamos uma cópia para recuperação."
+                    setRecovery("recovery.previous")
                 }
                 if fileManager.fileExists(atPath: documentURL.path) {
                     if fileManager.fileExists(atPath: backupURL.path) {
@@ -304,7 +290,7 @@ final class BoardStore: ObservableObject {
                             _ = try decode(existingBackup)
                         } catch {
                             try preserveUnreadableFile(at: backupURL)
-                            recoveryMessage = "A cópia anterior apresentou um erro. Guardamos o arquivo para recuperação."
+                            setRecovery("recovery.backupPrevious")
                         }
                     }
                     try previousData.write(to: backupURL, options: .atomic)
@@ -313,9 +299,10 @@ final class BoardStore: ObservableObject {
             try data.write(to: documentURL, options: .atomic)
             lastSaved = Date()
             saveError = nil
+            saveErrorKey = nil
             return true
         } catch {
-            saveError = "Não foi possível salvar o quadro. Seus cartões continuam abertos. \(error.localizedDescription)"
+            setSaveError("error.save", detail: localizedDetail(error))
             return false
         }
     }
@@ -387,8 +374,9 @@ final class BoardStore: ObservableObject {
                 do {
                     try preserveUnreadableFile(at: documentURL)
                 } catch {
-                    writesBlockedReason = "O arquivo do quadro apresentou um erro. Não conseguimos preservar uma cópia, por isso o salvamento está suspenso. \(error.localizedDescription)"
-                    saveError = writesBlockedReason
+                    writesBlockedKey = "error.preservePrimary"
+                    writesBlockedDetail = localizedDetail(error)
+                    setSaveError("error.preservePrimary", detail: writesBlockedDetail)
                 }
             }
         }
@@ -396,20 +384,21 @@ final class BoardStore: ObservableObject {
         if fileManager.fileExists(atPath: backupURL.path) {
             do {
                 snapshot = try decode(Data(contentsOf: backupURL))
-                recoveryMessage = "Recuperamos o quadro da última cópia de segurança. O arquivo anterior fica guardado na pasta do app."
+                setRecovery("recovery.backupRecovered")
                 return
             } catch {
                 unreadable = true
                 do {
                     try preserveUnreadableFile(at: backupURL)
                 } catch {
-                    writesBlockedReason = "Não conseguimos preservar a cópia do quadro. O salvamento está suspenso. \(error.localizedDescription)"
-                    saveError = writesBlockedReason
+                    writesBlockedKey = "error.preserveBackup"
+                    writesBlockedDetail = localizedDetail(error)
+                    setSaveError("error.preserveBackup", detail: writesBlockedDetail)
                 }
             }
         }
         if unreadable {
-            recoveryMessage = "Os arquivos do quadro apresentaram um erro. Guardamos os arquivos que conseguimos preservar na pasta do app."
+            setRecovery("recovery.unreadable")
         }
     }
 
@@ -419,17 +408,32 @@ final class BoardStore: ObservableObject {
         try fileManager.moveItem(at: url, to: preserved)
     }
 
-    private enum StorageError: LocalizedError {
-        case unsupportedVersion
-        case duplicateIdentifiers
-        case invalidWIPLimit
+    private func setSaveError(_ key: String, detail: String) {
+        saveErrorKey = key
+        saveErrorDetail = detail
+        saveError = L(key, ["detail": detail])
+    }
 
-        var errorDescription: String? {
-            switch self {
-            case .unsupportedVersion: return "A versão do arquivo ainda não é compatível com este app."
-            case .duplicateIdentifiers: return "O arquivo contém cartões com identificadores repetidos."
-            case .invalidWIPLimit: return "O arquivo contém um limite de produção inválido."
-            }
+    private func setRecovery(_ key: String) {
+        recoveryKey = key
+        recoveryMessage = L(key)
+    }
+
+    private func refreshLocalizedMessages() {
+        if let saveErrorKey { saveError = L(saveErrorKey, ["detail": saveErrorDetail]) }
+        if let recoveryKey { recoveryMessage = L(recoveryKey) }
+    }
+
+    private func localizedDetail(_ error: Error) -> String {
+        guard let storageError = error as? StorageError else { return error.localizedDescription }
+        switch storageError {
+        case .unsupportedVersion: return L("error.unsupportedVersion")
+        case .duplicateIdentifiers: return L("error.duplicateIdentifiers")
+        case .invalidWIPLimit: return L("error.invalidWIPLimit")
         }
+    }
+
+    private enum StorageError: Error {
+        case unsupportedVersion, duplicateIdentifiers, invalidWIPLimit
     }
 }

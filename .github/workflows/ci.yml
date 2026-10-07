@@ -1,4 +1,4 @@
-name: Mac Apple Silicon
+name: Build and verify Kornucopia
 
 on:
   push:
@@ -10,12 +10,13 @@ permissions:
   contents: read
 
 jobs:
-  validate:
+  macos:
+    name: macOS Apple Silicon
     runs-on: macos-26
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Require Apple Silicon
@@ -24,3 +25,149 @@ jobs:
         run: python3 scripts/audit-publication.py --check-index
       - name: Build, test and inspect release
         run: ./scripts/package-release.sh
+      - name: Upload verified macOS release files
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Kornucopia-1.0.1-macOS-arm64
+          path: |
+            dist/Kornucopia-v1.0.1-macOS-arm64.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+          include-hidden-files: false
+
+  windows:
+    name: Windows portable (${{ matrix.arch }})
+    runs-on: windows-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            rid: win-x64
+            pe_machine: 34404
+          - arch: arm64
+            rid: win-arm64
+            pe_machine: 43620
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DOTNET_NOLOGO: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install .NET 10 SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+      - name: Audit public files
+        run: python scripts/audit-publication.py --check-index
+      - name: Test persistence, WIP and localization
+        if: matrix.arch == 'x64'
+        run: |
+          dotnet run --project Windows/Tests/Kornucopia.Core.Tests.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Core tests failed.' }
+      - name: Publish self-contained portable app
+        env:
+          KORNUCOPIA_RID: ${{ matrix.rid }}
+        run: |
+          $output = Join-Path $env:GITHUB_WORKSPACE "dist/windows/$env:KORNUCOPIA_RID"
+          dotnet publish Windows/Kornucopia.Windows.csproj -c Release -r $env:KORNUCOPIA_RID --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -p:ContinuousIntegrationBuild=true "-p:PathMap=$env:GITHUB_WORKSPACE=/_/Kornucopia" -o $output
+          if ($LASTEXITCODE -ne 0) { throw 'Windows publish failed.' }
+      - name: Verify portable files and executable architecture
+        env:
+          KORNUCOPIA_RID: ${{ matrix.rid }}
+          KORNUCOPIA_MACHINE: ${{ matrix.pe_machine }}
+        run: |
+          $output = Join-Path $env:GITHUB_WORKSPACE "dist/windows/$env:KORNUCOPIA_RID"
+          $expected = @('Kornucopia.exe', 'Resources/Localization/en.json', 'Resources/Localization/es.json', 'Resources/Localization/fr.json', 'Resources/Localization/ja.json', 'Resources/Localization/pt-BR.json', 'Resources/RuntimeNotices/dotnet-runtime-LICENSE.TXT', 'Resources/RuntimeNotices/dotnet-runtime-THIRD-PARTY-NOTICES.TXT', 'Resources/RuntimeNotices/windowsdesktop-LICENSE.txt', 'Resources/RuntimeNotices/SOURCES.json') | Sort-Object
+          $files = @(Get-ChildItem $output -Recurse -File)
+          $actual = @($files | ForEach-Object { [IO.Path]::GetRelativePath($output, $_.FullName).Replace([char]92, [char]47) }) | Sort-Object
+          if (Compare-Object $expected $actual) { throw 'Unexpected or missing portable files.' }
+          if (Get-ChildItem $output -Recurse | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }) { throw 'Portable output contains symbolic links.' }
+          $exe = Join-Path $output 'Kornucopia.exe'
+          $stream = [IO.File]::OpenRead($exe)
+          $reader = [IO.BinaryReader]::new($stream)
+          try {
+            if ($reader.ReadUInt16() -ne 0x5a4d) { throw 'Missing PE executable header.' }
+            $stream.Position = 0x3c
+            $peOffset = $reader.ReadUInt32()
+            $stream.Position = $peOffset
+            if ($reader.ReadUInt32() -ne 0x4550 -or $reader.ReadUInt16() -ne [int]$env:KORNUCOPIA_MACHINE) { throw 'Executable architecture does not match release target.' }
+          } finally { $reader.Dispose(); $stream.Dispose() }
+          $bytes = [IO.File]::ReadAllBytes($exe)
+          foreach ($text in @([Text.Encoding]::UTF8.GetString($bytes), [Text.Encoding]::Unicode.GetString($bytes))) {
+            if ($text -match '/Users/|[A-Za-z]:\\Users\\[^\\\x00\r\n]+\\') { throw 'Executable contains a personal home path.' }
+          }
+          foreach ($locale in @('pt-BR', 'en', 'es', 'fr', 'ja')) {
+            $source = Get-FileHash "Resources/Localization/$locale.json" -Algorithm SHA256
+            $copy = Get-FileHash "$output/Resources/Localization/$locale.json" -Algorithm SHA256
+            if ($source.Hash -ne $copy.Hash) { throw 'Published locale differs from source.' }
+          }
+          foreach ($notice in @('dotnet-runtime-LICENSE.TXT', 'dotnet-runtime-THIRD-PARTY-NOTICES.TXT', 'windowsdesktop-LICENSE.txt', 'SOURCES.json')) {
+            $source = Get-FileHash "Windows/Resources/RuntimeNotices/$notice" -Algorithm SHA256
+            $copy = Get-FileHash "$output/Resources/RuntimeNotices/$notice" -Algorithm SHA256
+            if ($source.Hash -ne $copy.Hash) { throw 'Published runtime notice differs from source.' }
+          }
+          Write-Output 'PASS: strict portable allowlist, architecture, paths, locale copies and runtime notices'
+      - name: WPF smoke test on Windows Server runner (x64)
+        if: matrix.arch == 'x64'
+        run: |
+          $exe = Join-Path $env:GITHUB_WORKSPACE 'dist/windows/win-x64/Kornucopia.exe'
+          $smoke = Join-Path $env:RUNNER_TEMP 'Kornucopia-smoke'
+          $process = Start-Process -FilePath $exe -ArgumentList '--smoke-test', $smoke -PassThru
+          if (!$process.WaitForExit(120000)) { $process.Kill(); throw 'WPF smoke test timed out.' }
+          if ($process.ExitCode -ne 0) { throw 'WPF smoke test failed.' }
+          foreach ($file in @('pt-BR.png', 'en.png', 'es.png', 'fr.png', 'ja.png', 'smoke-report.json')) {
+            if (!(Test-Path (Join-Path $smoke $file))) { throw "WPF smoke evidence was not generated: $file" }
+          }
+      - name: Package verified Windows app
+        env:
+          KORNUCOPIA_ARCH: ${{ matrix.arch }}
+          KORNUCOPIA_RID: ${{ matrix.rid }}
+        run: |
+          $output = Join-Path $env:GITHUB_WORKSPACE "dist/windows/$env:KORNUCOPIA_RID"
+          $name = "Kornucopia-1.0.1-windows-$env:KORNUCOPIA_ARCH.zip"
+          $zip = Join-Path $env:GITHUB_WORKSPACE "dist/$name"
+          Compress-Archive -Path "$output/*" -DestinationPath $zip -CompressionLevel Optimal
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $name" | Set-Content "dist/SHA256SUMS-windows-$env:KORNUCOPIA_ARCH.txt" -Encoding utf8NoBOM
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $expected = @('Kornucopia.exe', 'Resources/Localization/en.json', 'Resources/Localization/es.json', 'Resources/Localization/fr.json', 'Resources/Localization/ja.json', 'Resources/Localization/pt-BR.json', 'Resources/RuntimeNotices/dotnet-runtime-LICENSE.TXT', 'Resources/RuntimeNotices/dotnet-runtime-THIRD-PARTY-NOTICES.TXT', 'Resources/RuntimeNotices/windowsdesktop-LICENSE.txt', 'Resources/RuntimeNotices/SOURCES.json') | Sort-Object
+            $actual = @($archive.Entries | Where-Object { $_.Name -ne '' } | ForEach-Object { $_.FullName.Replace([char]92, [char]47) }) | Sort-Object
+            if (Compare-Object $expected $actual) { throw 'ZIP allowlist failed.' }
+          } finally { $archive.Dispose() }
+      - name: Upload verified Windows release files
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Kornucopia-1.0.1-windows-${{ matrix.arch }}
+          path: |
+            dist/Kornucopia-1.0.1-windows-${{ matrix.arch }}.zip
+            dist/SHA256SUMS-windows-${{ matrix.arch }}.txt
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+          include-hidden-files: false
+      - name: Upload isolated WPF smoke evidence
+        if: matrix.arch == 'x64' && always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Windows-Server-WPF-smoke
+          path: |
+            ${{ runner.temp }}/Kornucopia-smoke/pt-BR.png
+            ${{ runner.temp }}/Kornucopia-smoke/en.png
+            ${{ runner.temp }}/Kornucopia-smoke/es.png
+            ${{ runner.temp }}/Kornucopia-smoke/fr.png
+            ${{ runner.temp }}/Kornucopia-smoke/ja.png
+            ${{ runner.temp }}/Kornucopia-smoke/smoke-report.json
+          if-no-files-found: ignore
+          retention-days: 7
+          include-hidden-files: false

@@ -11,6 +11,7 @@ import sys
 ROOT = Path(__file__).absolute().parent.parent
 PATTERNS = {
     "private home path": rb"/(?:Users|home)/[A-Za-z0-9_.-]+/",
+    "private Windows home path": rb"[A-Za-z]:[\\/](?:Users|Documents and Settings)[\\/][A-Za-z0-9_.-]+[\\/]",
     "private key": rb"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----",
     "GitHub credential": rb"(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})",
     "AWS access key": rb"(?:AKIA|ASIA)[A-Z0-9]{16}",

@@ -2,75 +2,105 @@
 
 <img src="Resources/Cornucopia.png" width="140" alt="Ícone do Kornucopia: uma cornucópia">
 
-Kornucopia é um Kanban nativo para Mac com cartões estilo post-it. Você organiza ideias, acompanha a produção e separa o que já concluiu em um quadro simples, com salvamento automático no próprio computador.
+Kornucopia organiza seu trabalho em um quadro Kanban com notas autoadesivas. Cada coluna ensina o próximo passo enquanto você registra ideias, produz, revisa e conclui. O app salva as alterações no próprio computador.
+
+[English](docs/README.en.md) · [Español](docs/README.es.md) · [Français](docs/README.fr.md) · [日本語](docs/README.ja.md)
 
 **[Baixar a versão mais recente](https://github.com/allanpscheidt/Kornucopia/releases/latest)**
+
+## Versão 1.0.1
+
+- Tutorial prático em cada coluna, com ações e orientação para avançar.
+- Interface em português brasileiro, inglês, espanhol, francês e japonês.
+- Escolha de idioma nas configurações, preservada entre sessões.
+- Aplicativo para Mac com Apple Silicon e versão portátil para Windows 11, em x64 e ARM64.
+
+A tradução muda a interface e os tutoriais. Seus títulos, anotações e nome do quadro permanecem como você os escreveu.
 
 ## O quadro
 
 Cada coluna tem sua própria cor. O cartão muda de cor quando você o move.
 
-| Coluna | Uso | Cor |
+| Coluna | O que fazer | Cor |
 | --- | --- | --- |
-| Backlog | Ideias esperando para serem trabalhadas | Amarelo |
-| Fazendo | Produção ativa | Azul |
-| Revisão | Edição e feedback | Roxo |
-| Feito | Trabalho concluído | Verde |
+| Backlog | Registre uma ideia e descreva a próxima ação. Espere uma vaga em Fazendo. | Amarelo |
+| Fazendo | Trabalhe no que já começou. Termine uma etapa antes de começar outra ideia. | Azul |
+| Revisão | Confira o resultado, corrija os detalhes e reúna feedback. | Roxo |
+| Feito | Registre o trabalho concluído e o que você aprende com ele. | Verde |
 
-Backlog, Revisão e Feito aceitam cartões sem um limite artificial de quantidade. Cada coluna tem rolagem independente. A capacidade prática acompanha a memória e o armazenamento disponíveis no Mac.
+Backlog, Revisão e Feito aceitam cartões sem um limite artificial de quantidade. Cada coluna tem rolagem independente. A capacidade prática acompanha a memória e o armazenamento disponíveis no computador.
 
-Fazendo começa com espaço para **dois cartões ao mesmo tempo**. Esse limite de WIP, ou trabalho em progresso, ajuda a concentrar a produção. Ao atingir o número configurado, o app bloqueia a entrada de outro cartão e mostra um alerta. Você pode aumentar o limite em Configurações. Para reduzi-lo, o novo número precisa acomodar os cartões que já estão em Fazendo.
+Fazendo começa com espaço para **dois cartões ao mesmo tempo**. Esse limite de WIP, ou trabalho em progresso, ajuda a concentrar a produção. Ao atingir o número configurado, o app bloqueia a entrada de outro cartão e mostra um alerta. A ideia nova pode esperar no Backlog enquanto você termina algo e o move para Revisão.
+
+Você pode aumentar o limite em Configurações. Para reduzi-lo, o novo número precisa acomodar os cartões que já estão em Fazendo. A regra vale na criação, no arraste e na mudança pelo editor.
 
 ## Instalação
 
-O app requer um **Mac com Apple Silicon, M1 ou posterior, e macOS 14 Sonoma ou posterior**. O pacote de distribuição contém o executável arm64.
+Escolha o pacote que corresponde ao seu computador na [página de releases](https://github.com/allanpscheidt/Kornucopia/releases/latest).
 
-1. Abra a [página de releases](https://github.com/allanpscheidt/Kornucopia/releases/latest) e baixe o arquivo ZIP para macOS arm64.
-2. Abra o ZIP no Finder.
-3. Copie `Kornucopia.app` para a pasta Aplicativos.
-4. Abra o Kornucopia pela pasta Aplicativos.
+| Computador | Pacote | Requisito |
+| --- | --- | --- |
+| Mac com Apple Silicon | `Kornucopia-v1.0.1-macOS-arm64.zip` | M1 ou posterior, macOS 14 ou posterior |
+| PC com processador x64 | `Kornucopia-1.0.1-windows-x64.zip` | Windows 11 |
+| PC com processador ARM64 | `Kornucopia-1.0.1-windows-arm64.zip` | Windows 11 ARM64 |
 
-A distribuição atual usa assinatura ad hoc local, sem certificado Developer ID ou notarização da Apple. O macOS pode bloquear a primeira abertura. Se você conferir a origem do download e decidir executar o app, siga o procedimento descrito pela Apple:
+### Mac
 
-1. Tente abrir o Kornucopia e feche o aviso.
-2. Abra Ajustes do Sistema e entre em Privacidade e Segurança.
-3. Localize o aviso sobre o Kornucopia e escolha **Abrir Mesmo Assim**, quando essa opção estiver disponível.
-4. Confirme a abertura na próxima janela.
+1. Abra o ZIP no Finder.
+2. Copie `Kornucopia.app` para a pasta Aplicativos.
+3. Abra o Kornucopia pela pasta Aplicativos.
 
-Esse procedimento cria uma exceção para o app. Mantenha as proteções gerais do macOS ativas. Consulte as [orientações oficiais da Apple sobre abertura de apps](https://support.apple.com/pt-br/102445), especialmente se o aviso indicar software danificado ou capaz de causar danos.
+Os comandos padrão do macOS, como Fechar, seguem o idioma do sistema. A escolha nas configurações traduz os controles, alertas e tutoriais do Kornucopia.
+
+O pacote usa assinatura ad hoc local, sem certificado Developer ID ou notarização da Apple. O macOS pode bloquear a primeira abertura. Se você conferir a origem e decidir executar o app, consulte as [orientações oficiais da Apple](https://support.apple.com/pt-br/102445). Elas explicam a opção **Abrir Mesmo Assim** em Ajustes do Sistema, Privacidade e Segurança. Mantenha as proteções gerais do sistema ativas.
+
+### Windows
+
+1. Extraia o ZIP completo para uma pasta de sua escolha.
+2. Mantenha `Kornucopia.exe` e a pasta `Resources` juntos.
+3. Abra `Kornucopia.exe`.
+
+O pacote inclui o runtime necessário e funciona sem instalar o .NET separadamente. A distribuição atual não possui assinatura Authenticode. O Windows pode exibir um aviso sobre o editor. Confira a origem do download e preserve as proteções do sistema.
+
+Cada pacote acompanha um arquivo `SHA256SUMS`. No Mac, use `shasum -a 256 -c SHA256SUMS.txt` na pasta do ZIP. No Windows, execute `Get-FileHash .\Kornucopia-1.0.1-windows-x64.zip -Algorithm SHA256` no PowerShell, ajustando o nome para ARM64 quando necessário. Compare o resultado com o arquivo de soma correspondente.
 
 ## Como usar
 
-- Clique em **Novo cartão** para adicionar uma ideia ao Backlog. O botão `+` de cada coluna cria um cartão nela, respeitando o limite de Fazendo.
-- Clique no cartão para editar título e anotações. As alterações salvam automaticamente.
-- Mova os cartões por arraste, pelo campo Coluna do editor ou pelo menu do botão direito.
-- Use o menu do botão direito para colocar um cartão no início ou no fim da coluna.
+- Crie uma nota no Backlog e escreva uma ação concreta no título.
+- Abra o cartão para editar o título e as anotações. O salvamento acompanha suas alterações.
+- Leia o tutorial da coluna e avance conforme o trabalho muda de etapa.
+- Mova os cartões por arraste ou pelo campo Coluna do editor.
 - Busque palavras do título ou das anotações no campo de busca.
-- Abra Configurações para renomear o quadro e ajustar o limite de Fazendo.
-- Exclua cartões pelo editor ou pelo menu do botão direito. Desfazer permite recuperá-los durante a mesma execução do app.
+- Abra Configurações para escolher o idioma, renomear o quadro e ajustar o limite de Fazendo.
+- Use Desfazer para recuperar uma alteração durante a mesma execução do app.
 
-| Atalho | Ação |
-| --- | --- |
-| `⌘N` | Criar cartão no Backlog |
-| `⌘F` | Focar a busca |
-| `⌘Z` | Desfazer |
-| `⇧⌘Z` | Refazer |
+| Ação | Mac | Windows |
+| --- | --- | --- |
+| Criar cartão no Backlog | `⌘N` | `Ctrl+N` |
+| Focar a busca | `⌘F` | `Ctrl+F` |
+| Desfazer | `⌘Z` | `Ctrl+Z` |
+| Refazer | `⇧⌘Z` | `Ctrl+Shift+Z` |
 
-O histórico guarda até 100 etapas durante a execução. Edições consecutivas de título e anotações do mesmo cartão se agrupam em uma etapa. Ao reabrir, o app restaura os cartões, o nome do quadro, o limite de Fazendo e a posição e o tamanho da janela. Se o editor estava aberto, ele retorna ao mesmo cartão quando esse cartão ainda existe.
+O histórico guarda até 100 etapas durante a execução. Ao reabrir, o app restaura os cartões, o nome do quadro, o idioma, o limite de Fazendo e a geometria da janela.
 
 ## Salvamento e recuperação
 
-Os cartões ficam em `~/Library/Application Support/Kornucopia/board.json`. Cada alteração grava um novo arquivo de forma atômica, substituindo o anterior após a escrita. `board.backup.json` guarda o estado imediatamente anterior.
+| Sistema | Pasta de dados |
+| --- | --- |
+| macOS | `~/Library/Application Support/Kornucopia/` |
+| Windows | `%LOCALAPPDATA%\Kornucopia\` |
 
-Se o app encontrar um arquivo ilegível, ele tenta recuperar a cópia de segurança e mostra um aviso. Os arquivos que consegue preservar ficam na mesma pasta com `.corrupt-` no nome. Essa cópia automática guarda apenas um estado anterior. Para manter versões antigas, inclua a pasta de dados em seu backup habitual.
+Cada alteração grava `board.json` de forma atômica. `board.backup.json` guarda o estado imediatamente anterior. Se o arquivo principal ficar ilegível, o app tenta recuperar a cópia e avisa você. Arquivos corrompidos que consegue preservar recebem `.corrupt-` no nome.
 
-Uma falha de escrita aparece no app com a opção **Tentar salvar**. Os cartões continuam na memória enquanto ele permanece aberto. Ao encerrar com alterações pendentes, o Kornucopia oferece manter o app aberto para tentar novamente.
+Uma falha de escrita aparece com a opção de tentar salvar novamente. Ao encerrar com alterações pendentes, o app oferece manter a sessão aberta. Para preservar versões antigas, inclua a pasta de dados em seu backup habitual.
 
-O quadro trabalha com arquivos locais. Esses arquivos contêm texto legível, sem criptografia própria do app. Consulte a [política de segurança](SECURITY.md) antes de relatar uma vulnerabilidade.
+Os arquivos contêm texto legível, sem criptografia própria do app. O app trabalha localmente, sem contas ou sincronização em nuvem. Consulte a [política de segurança](SECURITY.md) antes de relatar uma vulnerabilidade.
 
-## Compilar, testar e empacotar
+## Desenvolvimento
 
-Para trabalhar no código, use um Mac Apple Silicon com Xcode ou Command Line Tools, compilador Swift 6 e SDK macOS 26 ou posterior. O SDK permite compilar os recursos de arraste mais recentes, enquanto o app mantém macOS 14 como versão mínima de execução. Execute os comandos na raiz do repositório:
+A versão Mac usa SwiftUI. A versão Windows usa WPF e .NET 10. Ambas usam os mesmos cinco catálogos de tradução em `Resources/Localization`.
+
+Para compilar no Mac, use Apple Silicon, Swift 6 e SDK macOS 26 ou posterior. O app mantém macOS 14 como versão mínima de execução:
 
 ```sh
 ./scripts/build.sh
@@ -78,14 +108,17 @@ Para trabalhar no código, use um Mac Apple Silicon com Xcode ou Command Line To
 ./scripts/package-release.sh
 ```
 
-A compilação cria `build/Kornucopia.app`. O empacotamento produz o ZIP em `dist/`, com arquitetura e versão no nome, como `Kornucopia-v1.0.0-macOS-arm64.zip`. Os scripts usam as ferramentas de desenvolvimento do macOS.
+A compilação cria `build/Kornucopia.app`. Para instalar em Aplicativos, execute `./scripts/build.sh --install`.
 
-Para compilar e instalar diretamente na pasta Aplicativos:
+No Windows, use o SDK .NET 10 e PowerShell:
 
-```sh
-./scripts/build.sh --install
+```powershell
+./Windows/build.ps1 -Runtime win-x64 -Test
+./Windows/build.ps1 -Runtime win-arm64
 ```
 
-Os testes do modelo usam diretórios temporários. Eles verificam persistência, reordenação, WIP configurável, cores exclusivas, Desfazer/Refazer, recuperação de arquivos, falhas de escrita e um quadro com 1.201 cartões. A variável `KORNUCOPIA_DATA_DIR` permite escolher uma pasta isolada para testes da interface.
+Os testes usam dados fictícios em pastas temporárias. A variável `KORNUCOPIA_DATA_DIR` permite abrir uma sessão isolada para conferir a interface. O fluxo de CI compila os pacotes, testa persistência e WIP, confere os catálogos e audita o conteúdo distribuído. A verificação da interface Windows em CI usa um runner Windows Server, conforme identificado no nome da etapa.
 
-Veja [como contribuir](CONTRIBUTING.md) para relatar problemas ou propor alterações.
+`release-files.txt` define os arquivos públicos permitidos. A auditoria rejeita arquivos fora dessa lista, caminhos pessoais e padrões de credenciais. Quadros, backups, arquivos de teste e pastas de compilação ficam fora do código publicado.
+
+Veja [como contribuir](CONTRIBUTING.md).

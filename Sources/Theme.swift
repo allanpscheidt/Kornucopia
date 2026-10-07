@@ -64,20 +64,6 @@ extension KanbanColumn {
         case .done: return "checkmark"
         }
     }
-    var emptyTitle: String {
-        switch self {
-        case .backlog: return "Guarde uma ideia"
-        case .doing: return "Escolha o próximo passo"
-        case .review: return "Espaço para revisar"
-        case .done: return "O trabalho concluído fica aqui"
-        }
-    }
-    var emptyHelp: String {
-        switch self {
-        case .backlog: return "Crie um cartão para começar."
-        case .doing: return "Trabalhe em até 2 cartões por vez."
-        case .review: return "Traga um cartão para editar e avaliar."
-        case .done: return "Mova para cá o que você terminou."
-        }
-    }
+    @MainActor var emptyTitle: String { L("column." + rawValue + ".emptyTitle") }
+    @MainActor var emptyHelp: String { L("column." + rawValue + ".emptyHelp") }
 }
