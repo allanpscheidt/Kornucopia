@@ -8,6 +8,18 @@ O app salva de forma atômica e mantém uma cópia do estado anterior para recup
 
 Use cartões fictícios para demonstrar problemas. Revise títulos, anotações e caminhos antes de anexar uma captura ou um diagnóstico a um relato público.
 
+## Pasta de dados como limite de acesso
+
+A versão 1.0.3 verifica os componentes do caminho, o proprietário e as permissões antes de abrir o quadro ou as preferências. Pastas configuradas com links ou acesso concedido a outras contas são recusadas. A recusa pausa a leitura e o salvamento; os arquivos permanecem no lugar.
+
+No Mac, a pasta final pertence à conta atual e usa modo `0700`, sem ACL que conceda acesso a terceiros. Os diretórios acima dela precisam pertencer à conta atual ou ao sistema e impedir alterações por outras contas. Diretórios temporários do sistema com proteção sticky são tratados como pais, sem dispensar a verificação da pasta privada. Arquivos novos usam modo `0600`; o app confere as ACLs antes de gravar conteúdo e recusa objetos com permissões herdadas inseguras.
+
+Uma pasta padrão antiga do Mac com modo `0755`, sem escrita por terceiros e sem ACL insegura, pode receber modo `0700` por um descritor verificado. Essa migração informa o usuário e preserva os bytes dos quadros e backups. Pastas escolhidas pelas variáveis de ambiente não recebem essa alteração automática.
+
+No Windows, a pasta e os arquivos novos recebem uma DACL restrita à conta atual, SYSTEM e Administrators. A verificação também confere o acesso aos arquivos existentes antes de ler conteúdo, recusa concessões a outros principais e componentes reparse, incluindo junctions. Um arquivo copiado com permissões públicas precisa receber acesso privado antes de ser usado pelo app. As operações de uma leitura ou gravação mantêm referências abertas aos diretórios verificados. A abertura de arquivos, a criação temporária, a rotação do backup, a substituição e a preservação usam essas referências, com conferência do tipo, identidade e destino final do handle.
+
+O app não oferece um modo de armazenamento compartilhado entre contas. Use a pasta padrão ou uma pasta local privada ao configurar `KORNUCOPIA_DATA_DIR`; o Mac também aceita `KANBAN_DATA_DIR`. A proteção considera outras contas locais sem privilégios administrativos. Administradores e processos que já executam com a mesma identidade do usuário estão fora desse limite entre contas.
+
 ## Proteção ao carregar quadros
 
 A partir da versão 1.0.2, o app confere o tipo e o tamanho do arquivo principal e do backup antes de ler o conteúdo. A leitura limita a quantidade de bytes mesmo quando o arquivo cresce durante a operação. Links, arquivos especiais e aliases por hard link são recusados.

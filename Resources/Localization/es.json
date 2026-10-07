@@ -173,5 +173,8 @@
   "action.copyAndClose": "Copiar borrador y cerrar",
   "error.copyDraft": "No se pudo copiar el borrador. El editor sigue abierto.",
   "error.preferencesBudget": "Las preferencias superan los límites de seguridad o usan un tipo de archivo rechazado. El archivo admite 64 KiB y la búsqueda admite 4 KiB de texto UTF-8.",
-  "error.preferencesChanged": "Las preferencias cambiaron fuera de esta app. El guardado está pausado para preservar esa otra versión."
+  "error.preferencesChanged": "Las preferencias cambiaron fuera de esta app. El guardado está pausado para preservar esa otra versión.",
+  "error.storageUnsafeRoot": "La carpeta de datos o sus archivos tienen acceso inseguro o contienen enlaces. La lectura y el guardado se pausan para proteger su contenido. Usa almacenamiento local de tu cuenta con acceso restringido.",
+  "recovery.unsafeRoot": "Se rechazó el almacenamiento antes de leer sus archivos. Usa la carpeta predeterminada de tu cuenta o una carpeta local con archivos privados, sin enlaces ni acceso concedido a otras cuentas. Tus archivos permanecen en su lugar.",
+  "recovery.permissionsUpdated": "La aplicación restringió el acceso a la carpeta predeterminada de datos a tu cuenta. Tus tableros y copias de seguridad permanecen iguales."
 }

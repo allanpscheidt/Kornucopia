@@ -8,8 +8,10 @@ Kornucopia organiza seu trabalho em um quadro Kanban com notas autoadesivas. Cad
 
 **[Baixar a versão mais recente](https://github.com/allanpscheidt/Kornucopia/releases/latest)**
 
-## Versão 1.0.2
+## Versão 1.0.3
 
+- Pasta de dados verificada por proprietário, permissões e caminho, com recusa de pastas compartilhadas inseguras e links.
+- Operações de leitura, backup e gravação vinculadas à pasta verificada, inclusive no Windows.
 - Proteção contra quadros que exigem memória ou processamento excessivos, antes da leitura e da montagem dos cartões.
 - Recuperação de arquivos recusados, com aviso e preservação segura quando possível.
 - Windows mostra até 100 notas por página em cada coluna; a busca consulta o quadro inteiro.
@@ -44,9 +46,9 @@ Escolha o pacote que corresponde ao seu computador na [página de releases](http
 
 | Computador | Pacote | Requisito |
 | --- | --- | --- |
-| Mac com Apple Silicon | `Kornucopia-v1.0.2-macOS-arm64.zip` | M1 ou posterior, macOS 14 ou posterior |
-| PC com processador x64 | `Kornucopia-1.0.2-windows-x64.zip` | Windows 11 |
-| PC com processador ARM64 | `Kornucopia-1.0.2-windows-arm64.zip` | Windows 11 ARM64 |
+| Mac com Apple Silicon | `Kornucopia-v1.0.3-macOS-arm64.zip` | M1 ou posterior, macOS 14 ou posterior |
+| PC com processador x64 | `Kornucopia-1.0.3-windows-x64.zip` | Windows 11 |
+| PC com processador ARM64 | `Kornucopia-1.0.3-windows-arm64.zip` | Windows 11 ARM64 |
 
 ### Mac
 
@@ -66,7 +68,7 @@ O pacote usa assinatura ad hoc local, sem certificado Developer ID ou notarizaç
 
 O pacote inclui o runtime necessário e funciona sem instalar o .NET separadamente. A distribuição atual não possui assinatura Authenticode. O Windows pode exibir um aviso sobre o editor. Confira a origem do download e preserve as proteções do sistema.
 
-Cada pacote acompanha um arquivo `SHA256SUMS`. No Mac, use `shasum -a 256 -c SHA256SUMS.txt` na pasta do ZIP. No Windows, execute `Get-FileHash .\Kornucopia-1.0.2-windows-x64.zip -Algorithm SHA256` no PowerShell, ajustando o nome para ARM64 quando necessário. Compare o resultado com o arquivo de soma correspondente.
+Cada pacote acompanha um arquivo `SHA256SUMS`. No Mac, use `shasum -a 256 -c SHA256SUMS.txt` na pasta do ZIP. No Windows, execute `Get-FileHash .\Kornucopia-1.0.3-windows-x64.zip -Algorithm SHA256` no PowerShell, ajustando o nome para ARM64 quando necessário. Compare o resultado com o arquivo de soma correspondente.
 
 ## Como usar
 
@@ -95,6 +97,10 @@ O histórico guarda até 100 etapas durante a execução. Ao reabrir, o app rest
 | Windows | `%LOCALAPPDATA%\Kornucopia\` |
 
 Cada alteração grava `board.json` de forma atômica. `board.backup.json` guarda o estado imediatamente anterior. Se o arquivo principal ficar ilegível ou ultrapassar os limites de proteção, o app tenta recuperar a cópia e avisa você. Arquivos recusados que consegue preservar recebem `.corrupt-` no nome. Esses arquivos ficam fora da próxima leitura automática.
+
+A versão 1.0.3 verifica a pasta antes de abrir os arquivos. A pasta deve ter acesso restrito à sua conta; o Windows também permite as contas administrativas do sistema. Links em caminhos configurados e permissões que dão acesso a outras contas fazem o app pausar a leitura e o salvamento, com um aviso. O app deixa os arquivos dessa pasta no lugar.
+
+As opções avançadas `KORNUCOPIA_DATA_DIR` e `KANBAN_DATA_DIR` no Mac, e `KORNUCOPIA_DATA_DIR` no Windows, precisam apontar para uma pasta local privada. Evite uma pasta compartilhada entre contas. No Mac, uma pasta padrão de versões anteriores com permissões de leitura pública recebe acesso restrito à sua conta quando a verificação permite a migração segura. O app avisa sobre a mudança e mantém o conteúdo dos quadros e backups.
 
 As duas plataformas usam os mesmos limites, inclusive para o backup e para a transferência manual de quadros:
 

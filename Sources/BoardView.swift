@@ -162,7 +162,7 @@ struct BoardView: View {
         restoredSession = true
         if let message = store.recoveryMessage {
             let alert = NSAlert()
-            alert.messageText = L("recovery.title")
+            alert.messageText = L(store.recoveryTitleKey)
             alert.informativeText = message
             alert.addButton(withTitle: L("action.understood"))
             alert.runModal()

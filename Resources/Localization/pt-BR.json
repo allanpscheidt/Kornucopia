@@ -173,5 +173,8 @@
   "action.copyAndClose": "Copiar rascunho e fechar",
   "error.copyDraft": "Não foi possível copiar o rascunho. O editor continua aberto.",
   "error.preferencesBudget": "As preferências ultrapassam os limites de segurança ou usam um tipo de arquivo recusado. O arquivo aceita 64 KiB e a busca aceita 4 KiB de texto UTF-8.",
-  "error.preferencesChanged": "As preferências mudaram fora deste app. O salvamento está pausado para preservar essa outra versão."
+  "error.preferencesChanged": "As preferências mudaram fora deste app. O salvamento está pausado para preservar essa outra versão.",
+  "error.storageUnsafeRoot": "A pasta de dados ou seus arquivos têm acesso inseguro ou contêm links. O app pausa a leitura e o salvamento para proteger seu conteúdo. Use armazenamento local da sua conta com acesso restrito.",
+  "recovery.unsafeRoot": "O armazenamento foi recusado antes de ler seus arquivos. Use a pasta padrão da sua conta ou uma pasta local com arquivos privados, sem links ou acesso concedido a outras contas. Seus arquivos permanecem no lugar.",
+  "recovery.permissionsUpdated": "O app restringiu o acesso à sua pasta padrão de dados para a sua conta. Seus quadros e backups permanecem iguais."
 }

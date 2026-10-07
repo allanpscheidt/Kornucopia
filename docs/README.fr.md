@@ -4,8 +4,10 @@ Kornucopia organise votre travail sur un tableau Kanban avec des notes adhésive
 
 **[Télécharger la dernière version](https://github.com/allanpscheidt/Kornucopia/releases/latest)** · [Português brasileiro](../README.md)
 
-## Version 1.0.2
+## Version 1.0.3
 
+- Vérification du propriétaire, des permissions et du chemin du dossier de données avant l’ouverture des fichiers.
+- Lecture, sauvegarde et enregistrement liés au dossier vérifié sur les deux plateformes.
 - Tutoriels pratiques dans les quatre colonnes.
 - Interface en portugais brésilien, anglais, espagnol, français et japonais.
 - Choix de langue conservé dans les réglages. Vos notes gardent leur texte d'origine.
@@ -13,7 +15,9 @@ Kornucopia organise votre travail sur un tableau Kanban avec des notes adhésive
 
 En cours commence avec une limite de deux cartes. Une alerte bloque l'ajout d'une carte lorsque la limite est atteinte. Terminez une tâche et déplacez-la vers Révision avant d'en commencer une autre. Vous pouvez augmenter la limite dans les réglages. Le tableau accepte jusqu’à 10 000 notes dans son budget de sécurité. Windows affiche 100 notes par page de chaque colonne ; la recherche inclut toutes les pages.
 
-La version 1.0.2 vérifie le type et la taille du fichier avant de lire le tableau principal et sa sauvegarde. Les limites communes sont de 16 Mio de JSON et de 8 Mio de texte UTF-8 au total, avec des limites plus petites par champ. Les fichiers refusés sont préservés en sécurité lorsque cela est possible ; l’app tente la sauvegarde et affiche un avertissement. Les textes refusés restent dans l’éditeur ouvert et peuvent être copiés avant de fermer. Consultez les [limites complètes](../README.md#salvamento-e-recuperação).
+La version 1.0.3 vérifie le type et la taille du fichier avant de lire le tableau principal et sa sauvegarde. Les limites communes sont de 16 Mio de JSON et de 8 Mio de texte UTF-8 au total, avec des limites plus petites par champ. Les fichiers refusés sont préservés en sécurité lorsque cela est possible ; l’app tente la sauvegarde et affiche un avertissement. Les textes refusés restent dans l’éditeur ouvert et peuvent être copiés avant de fermer. Consultez les [limites complètes](../README.md#salvamento-e-recuperação).
+
+Utilisez le dossier de données par défaut ou un dossier local privé de votre compte. Les chemins configurés avec des liens ou un accès non sécurisé pour d’autres comptes suspendent la lecture et l’enregistrement avant l’ouverture des fichiers. Ceux-ci restent en place. Sur Mac, un ancien dossier par défaut qui passe la vérification reçoit des permissions privées avec un avis ; le contenu du tableau et de sa sauvegarde reste inchangé. Consultez les [règles d’accès](../SECURITY.md#pasta-de-dados-como-limite-de-acesso).
 
 ## Installation et utilisation
 

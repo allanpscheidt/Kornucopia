@@ -1,5 +1,14 @@
 # Histórico de versões
 
+## 1.0.3
+
+- Verificação do proprietário, das permissões e das ACLs da pasta de dados antes de abrir arquivos.
+- Recusa de links nos componentes de caminhos configurados e de pastas compartilhadas inseguras.
+- Leitura, criação temporária, backup, substituição e preservação vinculados à pasta verificada nas duas plataformas.
+- Arquivos novos recebem acesso restrito; objetos com permissões herdadas inseguras são recusados antes de receber conteúdo do quadro.
+- Migração segura das permissões da pasta padrão antiga no Mac, com aviso e preservação do conteúdo.
+- Aviso de pasta recusada nos cinco idiomas, sem tentar recuperar ou mover arquivos dessa pasta.
+
 ## 1.0.2
 
 - Limites de arquivo, notas, texto, profundidade e trabalho de leitura antes de desserializar quadros no Mac e no Windows.

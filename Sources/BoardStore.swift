@@ -3,6 +3,11 @@ import CryptoKit
 import Darwin
 import Foundation
 
+// membership.h is not exposed by the Darwin Swift module. This public libc
+// function identifies an ACL user without resolving a path or a group name.
+@_silgen_name("mbr_uid_to_uuid")
+private func membershipUserUUID(_ uid: uid_t, _ uuid: UnsafeMutablePointer<UInt8>) -> Int32
+
 /// Shared with Windows. Text budgets measure decoded UTF-8, never character counts.
 enum BoardStorageLimits {
     static let fileBytes = 16 * 1_024 * 1_024
@@ -36,7 +41,7 @@ enum BoardStorageLimits {
 private enum StorageError: Error, Equatable {
     case unsupportedVersion, duplicateIdentifiers, invalidWIPLimit
     case fileType, fileSize, cardCount, fieldSize, textBudget
-    case structure, changed
+    case structure, changed, unsafeRoot
 }
 
 enum KanbanColumn: String, Codable, CaseIterable, Identifiable {
@@ -148,8 +153,12 @@ final class BoardStore: ObservableObject {
     var documentURL: URL { dataDirectory.appendingPathComponent("board.json") }
     var backupURL: URL { dataDirectory.appendingPathComponent("board.backup.json") }
     var wipLimit: Int { snapshot.wipLimit }
+    var recoveryTitleKey: String {
+        recoveryKey == "recovery.unsafeRoot" || recoveryKey == "recovery.permissionsUpdated"
+            ? "storage.alertTitle" : "recovery.title"
+    }
 
-    private let fileManager = FileManager.default
+    private let isDefaultDataDirectory: Bool
     private let historyLimit = 100
     private let textEditInterval: TimeInterval = 0.7
     private var undoStack: [BoardSnapshot] = []
@@ -165,23 +174,28 @@ final class BoardStore: ObservableObject {
     private var expectedPrimaryDigest: Data?
     private var expectedBackupDigest: Data?
     private var lastRejectedStorageKey: String?
-    private var expectedRootIdentity: RootIdentity?
+    private var pinnedDirectories: [PinnedDirectory] = []
     private var rootPath: String {
-        var path = dataDirectory.standardizedFileURL.path
-        while path.count > 1 && path.hasSuffix("/") { path.removeLast() }
-        return path
+        // Foundation's standardizedFileURL can rewrite /private/tmp to the
+        // symlink /tmp. Only remove lexical ./ components; never resolve aliases.
+        let parts = dataDirectory.path.split(separator: "/").filter { $0 != "." }
+        return "/" + parts.joined(separator: "/")
     }
 
     init(directory: URL? = nil) {
         if let directory {
             dataDirectory = directory
+            isDefaultDataDirectory = false
         } else if let path = ProcessInfo.processInfo.environment["KORNUCOPIA_DATA_DIR"], !path.isEmpty {
             dataDirectory = URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true)
+            isDefaultDataDirectory = false
         } else if let path = ProcessInfo.processInfo.environment["KANBAN_DATA_DIR"], !path.isEmpty {
             dataDirectory = URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true)
+            isDefaultDataDirectory = false
         } else {
             let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             dataDirectory = support.appendingPathComponent("Kornucopia", isDirectory: true)
+            isDefaultDataDirectory = true
         }
         snapshot = BoardSnapshot(boardTitle: L("board.defaultTitle"))
         load()
@@ -359,7 +373,7 @@ final class BoardStore: ObservableObject {
                     previousData = existing.data
                     primaryIdentity = existing.identity
                 } catch {
-                    if error as? StorageError == .changed { throw error }
+                    if error as? StorageError == .changed || error as? StorageError == .unsafeRoot { throw error }
                     try preserveUnreadableFile(at: documentURL, expected: identity, directoryFD: directoryFD)
                     expectedPrimaryDigest = nil
                     setRecovery("recovery.previous")
@@ -377,7 +391,7 @@ final class BoardStore: ObservableObject {
                     }
                     backupIdentity = file.identity
                 } catch {
-                    if error as? StorageError == .changed { throw error }
+                    if error as? StorageError == .changed || error as? StorageError == .unsafeRoot { throw error }
                     try preserveUnreadableFile(at: backupURL, expected: identity, directoryFD: directoryFD)
                     expectedBackupDigest = nil
                     setRecovery("recovery.backupPrevious")
@@ -397,6 +411,7 @@ final class BoardStore: ObservableObject {
             return true
         } catch {
             setSaveError("error.save", detail: localizedDetail(error))
+            if error as? StorageError == .unsafeRoot { setRecovery("recovery.unsafeRoot") }
             return false
         }
     }
@@ -482,7 +497,13 @@ final class BoardStore: ObservableObject {
             defer { close(directoryFD) }
             try load(directoryFD: directoryFD)
         } catch {
+            // An interrupted initial load never establishes ownership of bytes
+            // that were read but not installed as this session's snapshot.
+            expectedPrimaryDigest = nil
+            expectedBackupDigest = nil
+            lastSaved = nil
             setSaveError("error.save", detail: localizedDetail(error))
+            if error as? StorageError == .unsafeRoot { setRecovery("recovery.unsafeRoot") }
         }
     }
 
@@ -499,6 +520,7 @@ final class BoardStore: ObservableObject {
                 expectedPrimaryDigest = digest(file.data)
                 lastSaved = Date(timeIntervalSince1970: TimeInterval(file.identity.modifiedSeconds) + TimeInterval(file.identity.modifiedNanoseconds) / 1_000_000_000)
             } catch {
+                if error as? StorageError == .unsafeRoot { throw error }
                 unreadable = true
                 do {
                     if error as? StorageError == .changed { throw error }
@@ -518,6 +540,7 @@ final class BoardStore: ObservableObject {
                 backup = try decode(data)
                 expectedBackupDigest = digest(data)
             } catch {
+                if error as? StorageError == .unsafeRoot { throw error }
                 unreadable = true
                 rejectedBackup = true
                 do {
@@ -560,49 +583,190 @@ final class BoardStore: ObservableObject {
         init(_ value: stat) { device = value.st_dev; inode = value.st_ino }
     }
 
-    /// Only the final directory itself is trusted; never resolve it through a symlink.
+    /// Descriptors keep each ancestor fixed. Every component is opened relative
+    /// to its verified parent, so neither parent links nor later swaps redirect IO.
+    private final class PinnedDirectory {
+        let descriptor: Int32
+        let name: String
+        let identity: RootIdentity
+        var securityStamp: FileIdentity?
+
+        init(descriptor: Int32, name: String, metadata: stat) {
+            self.descriptor = descriptor
+            self.name = name
+            identity = RootIdentity(metadata)
+        }
+
+        deinit { close(descriptor) }
+    }
+
     private func openDataDirectory(createIfMissing: Bool) throws -> Int32? {
-        var pathMetadata = stat()
-        if lstat(rootPath, &pathMetadata) != 0 {
-            if errno != ENOENT { throw posixError() }
-            if expectedRootIdentity != nil { throw StorageError.changed }
-            guard createIfMissing else { return nil }
-            try fileManager.createDirectory(at: URL(fileURLWithPath: rootPath, isDirectory: true), withIntermediateDirectories: true)
-            guard lstat(rootPath, &pathMetadata) == 0 else { throw posixError() }
+        if let root = pinnedDirectories.last {
+            try validateRoot(root.descriptor)
+            let duplicate = fcntl(root.descriptor, F_DUPFD_CLOEXEC, 0)
+            guard duplicate >= 0 else { throw posixError() }
+            return duplicate
         }
-        guard pathMetadata.st_mode & S_IFMT == S_IFDIR else { throw StorageError.fileType }
-        let descriptor = open(rootPath, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-        guard descriptor >= 0 else {
-            if errno == ELOOP || errno == ENOTDIR { throw StorageError.fileType }
-            throw posixError()
+
+        let components = rootPath.split(separator: "/").map(String.init)
+        guard rootPath.hasPrefix("/"), !components.isEmpty,
+              !components.contains("."), !components.contains("..") else { throw StorageError.unsafeRoot }
+        var chain: [PinnedDirectory] = []
+        let filesystemFD = open("/", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard filesystemFD >= 0 else { throw posixError() }
+        var metadata = stat()
+        guard fstat(filesystemFD, &metadata) == 0 else { close(filesystemFD); throw posixError() }
+        chain.append(PinnedDirectory(descriptor: filesystemFD, name: "/", metadata: metadata))
+        try Self.validateDirectory(filesystemFD, metadata: metadata, isRoot: false)
+
+        for (index, component) in components.enumerated() {
+            let parent = chain.last!
+            try validateChain(chain, rootIsFinal: false)
+            var pathMetadata = stat()
+            if fstatat(parent.descriptor, component, &pathMetadata, AT_SYMLINK_NOFOLLOW) != 0 {
+                guard errno == ENOENT else { throw posixError() }
+                guard createIfMissing else { return nil }
+                if mkdirat(parent.descriptor, component, 0o700) != 0 && errno != EEXIST { throw posixError() }
+                guard fstatat(parent.descriptor, component, &pathMetadata, AT_SYMLINK_NOFOLLOW) == 0 else { throw posixError() }
+            }
+            guard pathMetadata.st_mode & S_IFMT == S_IFDIR else { throw StorageError.unsafeRoot }
+            let descriptor = openat(parent.descriptor, component, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            guard descriptor >= 0 else {
+                if errno == ELOOP || errno == ENOTDIR || errno == EACCES { throw StorageError.unsafeRoot }
+                throw posixError()
+            }
+            guard fstat(descriptor, &metadata) == 0 else { close(descriptor); throw posixError() }
+            let node = PinnedDirectory(descriptor: descriptor, name: component, metadata: metadata)
+            chain.append(node)
+            guard RootIdentity(metadata) == RootIdentity(pathMetadata) else { throw StorageError.changed }
+            let isRoot = index == components.count - 1
+            if isRoot && isDefaultDataDirectory && metadata.st_mode & 0o7777 == 0o755 {
+                try validateChain(chain, rootIsFinal: false)
+                if try Self.tightenLegacyDefaultPermissions(descriptor: descriptor) {
+                    setRecovery("recovery.permissionsUpdated")
+                    guard fstat(descriptor, &metadata) == 0 else { throw posixError() }
+                }
+            }
+            try Self.validateDirectory(descriptor, metadata: metadata, isRoot: isRoot)
+            node.securityStamp = FileIdentity(metadata)
         }
-        do {
+        try validateChain(chain, rootIsFinal: true)
+        pinnedDirectories = chain
+        let duplicate = fcntl(chain.last!.descriptor, F_DUPFD_CLOEXEC, 0)
+        guard duplicate >= 0 else { throw posixError() }
+        return duplicate
+    }
+
+    private func validateChain(_ chain: [PinnedDirectory], rootIsFinal: Bool) throws {
+        for (index, node) in chain.enumerated() {
             var metadata = stat()
-            guard fstat(descriptor, &metadata) == 0 else { throw posixError() }
-            let identity = RootIdentity(metadata)
-            guard metadata.st_mode & S_IFMT == S_IFDIR, identity == RootIdentity(pathMetadata) else { throw StorageError.changed }
-            if let expectedRootIdentity, expectedRootIdentity != identity { throw StorageError.changed }
-            expectedRootIdentity = identity
-            try validateRoot(descriptor)
-            return descriptor
-        } catch {
-            close(descriptor)
-            throw error
+            guard fstat(node.descriptor, &metadata) == 0 else { throw posixError() }
+            guard RootIdentity(metadata) == node.identity else { throw StorageError.changed }
+            if index > 0 {
+                var pathMetadata = stat()
+                guard fstatat(chain[index - 1].descriptor, node.name, &pathMetadata, AT_SYMLINK_NOFOLLOW) == 0,
+                      pathMetadata.st_mode & S_IFMT == S_IFDIR,
+                      RootIdentity(pathMetadata) == node.identity else { throw StorageError.changed }
+            }
+            let stamp = FileIdentity(metadata)
+            if node.securityStamp != stamp {
+                try Self.validateDirectory(node.descriptor, metadata: metadata, isRoot: rootIsFinal && index == chain.count - 1)
+                node.securityStamp = stamp
+            } else {
+                try Self.validateDirectoryMode(metadata, isRoot: rootIsFinal && index == chain.count - 1)
+            }
         }
     }
 
     private func validateRoot(_ descriptor: Int32) throws {
-        var descriptorMetadata = stat()
-        var pathMetadata = stat()
-        guard fstat(descriptor, &descriptorMetadata) == 0 else { throw posixError() }
-        guard lstat(rootPath, &pathMetadata) == 0,
-              pathMetadata.st_mode & S_IFMT == S_IFDIR,
-              RootIdentity(pathMetadata) == RootIdentity(descriptorMetadata),
-              expectedRootIdentity == RootIdentity(descriptorMetadata) else { throw StorageError.changed }
+        guard let root = pinnedDirectories.last else { throw StorageError.unsafeRoot }
+        try validateChain(pinnedDirectories, rootIsFinal: true)
+        var metadata = stat()
+        guard fstat(descriptor, &metadata) == 0 else { throw posixError() }
+        guard RootIdentity(metadata) == root.identity else { throw StorageError.changed }
+    }
+
+    private static func validateDirectoryMode(_ metadata: stat, isRoot: Bool) throws {
+        guard metadata.st_mode & S_IFMT == S_IFDIR else { throw StorageError.unsafeRoot }
+        if isRoot {
+            guard metadata.st_uid == geteuid(), metadata.st_mode & 0o7777 == 0o700 else { throw StorageError.unsafeRoot }
+        } else {
+            guard metadata.st_uid == geteuid() || metadata.st_uid == 0 else { throw StorageError.unsafeRoot }
+            // Sticky directories protect entries owned by the current user even
+            // when the OS permits other users to create their own temporary files.
+            guard metadata.st_mode & 0o022 == 0 || metadata.st_mode & S_ISVTX != 0 else { throw StorageError.unsafeRoot }
+        }
+    }
+
+    private static func validateDirectory(_ descriptor: Int32, metadata: stat, isRoot: Bool) throws {
+        try validateDirectoryMode(metadata, isRoot: isRoot)
+        try validateACL(descriptor, privateAccess: isRoot)
+    }
+
+    /// Internal migration helper. Production calls it only for the app's actual
+    /// default per-user folder after all pinned parents have passed validation.
+    static func tightenLegacyDefaultPermissions(descriptor: Int32) throws -> Bool {
+        var metadata = stat()
+        guard fstat(descriptor, &metadata) == 0 else { throw StorageError.unsafeRoot }
+        guard metadata.st_mode & S_IFMT == S_IFDIR, metadata.st_uid == geteuid() else { throw StorageError.unsafeRoot }
+        if metadata.st_mode & 0o7777 == 0o700 {
+            try validateACL(descriptor, privateAccess: true)
+            return false
+        }
+        guard metadata.st_mode & 0o7777 == 0o755 else { throw StorageError.unsafeRoot }
+        try validateACL(descriptor, privateAccess: true)
+        guard fchmod(descriptor, 0o700) == 0 else { throw StorageError.unsafeRoot }
+        guard fstat(descriptor, &metadata) == 0 else { throw StorageError.unsafeRoot }
+        try validateDirectory(descriptor, metadata: metadata, isRoot: true)
+        return true
+    }
+
+    private static func validateACL(_ descriptor: Int32, privateAccess: Bool) throws {
+        guard let acl = acl_get_fd_np(descriptor, ACL_TYPE_EXTENDED) else {
+            if errno == ENOENT { return }
+            throw StorageError.unsafeRoot
+        }
+        defer { acl_free(UnsafeMutableRawPointer(acl)) }
+        guard acl_valid(acl) == 0 else { throw StorageError.unsafeRoot }
+        var currentUser = [UInt8](repeating: 0, count: 16)
+        let userResult = currentUser.withUnsafeMutableBufferPointer { membershipUserUUID(geteuid(), $0.baseAddress!) }
+        guard userResult == 0 else { throw StorageError.unsafeRoot }
+        let writePermissions = UInt64(ACL_WRITE_DATA.rawValue | ACL_DELETE.rawValue | ACL_APPEND_DATA.rawValue |
+                                      ACL_DELETE_CHILD.rawValue | ACL_WRITE_ATTRIBUTES.rawValue | ACL_WRITE_EXTATTRIBUTES.rawValue |
+                                      ACL_WRITE_SECURITY.rawValue | ACL_CHANGE_OWNER.rawValue)
+        var entry: acl_entry_t?
+        var position = Int32(ACL_FIRST_ENTRY.rawValue)
+        var count = 0
+        while true {
+            errno = 0
+            let result = acl_get_entry(acl, position, &entry)
+            if result != 0 {
+                guard errno == ENOENT || errno == EINVAL else { throw StorageError.unsafeRoot }
+                break
+            }
+            guard let entry else { throw StorageError.unsafeRoot }
+            count += 1
+            guard count <= 128 else { throw StorageError.unsafeRoot }
+            position = Int32(ACL_NEXT_ENTRY.rawValue)
+            var tag = ACL_UNDEFINED_TAG
+            var mask: acl_permset_mask_t = 0
+            guard acl_get_tag_type(entry, &tag) == 0, acl_get_permset_mask_np(entry, &mask) == 0 else { throw StorageError.unsafeRoot }
+            guard tag == ACL_EXTENDED_ALLOW, privateAccess ? mask != 0 : mask & writePermissions != 0 else { continue }
+            guard let qualifier = acl_get_qualifier(entry) else { throw StorageError.unsafeRoot }
+            defer { acl_free(qualifier) }
+            let principal = qualifier.assumingMemoryBound(to: UInt8.self)
+            guard currentUser.elementsEqual(UnsafeBufferPointer(start: principal, count: 16)) else { throw StorageError.unsafeRoot }
+        }
+    }
+
+    private static func validateFileAccess(_ descriptor: Int32, metadata: stat) throws {
+        guard metadata.st_uid == geteuid(), metadata.st_mode & 0o022 == 0 else { throw StorageError.unsafeRoot }
+        try validateACL(descriptor, privateAccess: true)
     }
 
     private func reservedName(for url: URL) throws -> String {
-        guard url.deletingLastPathComponent().standardizedFileURL == dataDirectory.standardizedFileURL else { throw StorageError.fileType }
+        let parent = "/" + url.deletingLastPathComponent().path.split(separator: "/").filter { $0 != "." }.joined(separator: "/")
+        guard parent == rootPath else { throw StorageError.fileType }
         return url.lastPathComponent
     }
 
@@ -611,6 +775,8 @@ final class BoardStore: ObservableObject {
         let device: dev_t
         let inode: ino_t
         let mode: mode_t
+        let owner: uid_t
+        let group: gid_t
         let links: nlink_t
         let bytes: off_t
         let modifiedSeconds: Int
@@ -622,6 +788,8 @@ final class BoardStore: ObservableObject {
             device = value.st_dev
             inode = value.st_ino
             mode = value.st_mode
+            owner = value.st_uid
+            group = value.st_gid
             links = value.st_nlink
             bytes = value.st_size
             modifiedSeconds = value.st_mtimespec.tv_sec
@@ -649,7 +817,7 @@ final class BoardStore: ObservableObject {
         var pathMetadata = stat()
         guard fstatat(directoryFD, filename, &pathMetadata, AT_SYMLINK_NOFOLLOW) == 0 else { throw posixError() }
         guard pathMetadata.st_mode & S_IFMT == S_IFREG, pathMetadata.st_nlink == 1 else { throw StorageError.fileType }
-        guard pathMetadata.st_size >= 0, pathMetadata.st_size <= BoardStorageLimits.fileBytes else { throw StorageError.fileSize }
+        guard pathMetadata.st_uid == geteuid(), pathMetadata.st_mode & 0o022 == 0 else { throw StorageError.unsafeRoot }
         let descriptor = openat(directoryFD, filename, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
         guard descriptor >= 0 else {
             if errno == ELOOP { throw StorageError.fileType }
@@ -659,6 +827,7 @@ final class BoardStore: ObservableObject {
         var metadata = stat()
         guard fstat(descriptor, &metadata) == 0 else { throw posixError() }
         guard metadata.st_mode & S_IFMT == S_IFREG, metadata.st_nlink == 1 else { throw StorageError.fileType }
+        try Self.validateFileAccess(descriptor, metadata: metadata)
         guard metadata.st_size >= 0, metadata.st_size <= BoardStorageLimits.fileBytes else { throw StorageError.fileSize }
         let identity = FileIdentity(metadata)
         guard identity == FileIdentity(pathMetadata) else { throw StorageError.changed }
@@ -677,6 +846,7 @@ final class BoardStore: ObservableObject {
                 guard fstat(descriptor, &finalMetadata) == 0 else { throw posixError() }
                 guard FileIdentity(finalMetadata) == identity,
                       try fileIdentity(at: url, directoryFD: directoryFD) == identity, data.count == identity.bytes else { throw StorageError.changed }
+                try Self.validateFileAccess(descriptor, metadata: finalMetadata)
                 return BoardFile(data: data, identity: identity)
             }
             guard count <= BoardStorageLimits.fileBytes - data.count else { throw StorageError.fileSize }
@@ -702,6 +872,10 @@ final class BoardStore: ObservableObject {
             close(descriptor)
             if !renamed { unlinkat(directoryFD, temporaryName, 0) }
         }
+        var createdMetadata = stat()
+        guard fstat(descriptor, &createdMetadata) == 0 else { throw posixError() }
+        try Self.validateFileAccess(descriptor, metadata: createdMetadata)
+        try validateRoot(directoryFD)
         try data.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) in
             var offset = 0
             while offset < bytes.count {
@@ -716,6 +890,7 @@ final class BoardStore: ObservableObject {
         }
         var temporaryMetadata = stat()
         guard fstat(descriptor, &temporaryMetadata) == 0 else { throw posixError() }
+        try Self.validateFileAccess(descriptor, metadata: temporaryMetadata)
         var pathMetadata = stat()
         guard fstatat(directoryFD, temporaryName, &pathMetadata, AT_SYMLINK_NOFOLLOW) == 0 else { throw StorageError.changed }
         guard FileIdentity(pathMetadata) == FileIdentity(temporaryMetadata) else { throw StorageError.changed }
@@ -779,6 +954,14 @@ final class BoardStore: ObservableObject {
         guard let expected, current == expected else { throw StorageError.changed }
         let kind = current.mode & S_IFMT
         guard kind == S_IFREG || kind == S_IFLNK else { throw StorageError.fileType }
+        if kind == S_IFREG {
+            let descriptor = openat(directoryFD, filename, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+            guard descriptor >= 0 else { throw StorageError.changed }
+            defer { close(descriptor) }
+            var metadata = stat()
+            guard fstat(descriptor, &metadata) == 0, FileIdentity(metadata) == current else { throw StorageError.changed }
+            try Self.validateFileAccess(descriptor, metadata: metadata)
+        }
         let stamp = Int(Date().timeIntervalSince1970 * 1_000)
         let preserved = "\(url.deletingPathExtension().lastPathComponent).corrupt-\(stamp)-\(UUID().uuidString).json"
         try validateRoot(directoryFD)
@@ -818,6 +1001,7 @@ final class BoardStore: ObservableObject {
         case .textBudget: return "error.storageTextBudget"
         case .structure: return "error.storageStructure"
         case .changed: return "error.storageChanged"
+        case .unsafeRoot: return "error.storageUnsafeRoot"
         }
     }
 

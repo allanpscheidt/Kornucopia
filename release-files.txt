@@ -7,6 +7,7 @@ docs/README.fr.md
 docs/README.ja.md
 docs/release-1.0.1.pt-BR.md
 docs/release-1.0.2.pt-BR.md
+docs/release-1.0.3.pt-BR.md
 CHANGELOG.md
 SECURITY.md
 CONTRIBUTING.md
@@ -50,5 +51,6 @@ Windows/App/Dialogs.cs
 Windows/App/MainWindow.cs
 Windows/App/Ui.cs
 Windows/Core/BoardStore.cs
+Windows/Core/StorageDirectory.cs
 Windows/Core/Kornucopia.Core.csproj
 Windows/Core/Preferences.cs

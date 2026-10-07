@@ -24,7 +24,14 @@ struct StoreTests {
         try serializedBudget()
         try externallyChangedBoard()
         try rootDirectoryProtection()
-        print("PASS: 19 grupos de testes do modelo, da persistência e dos limites de armazenamento")
+        try privateLeafLinkIsolation()
+        try parentPathTrust()
+        try privatePermissions()
+        try accessControlLists()
+        try legacyDefaultPermissions()
+        try parentSwapProtection()
+        try interruptedInitialLoad()
+        print("PASS: 26 grupos de testes do modelo, da persistência e da proteção do armazenamento")
     }
 
     @MainActor
@@ -551,7 +558,7 @@ struct StoreTests {
         let parent = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: parent) }
         let original = parent.appendingPathComponent("board-root", isDirectory: true)
-        try FileManager.default.createDirectory(at: original, withIntermediateDirectories: false)
+        try FileManager.default.createDirectory(at: original, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         let store = BoardStore(directory: original)
         let id = try unwrap(store.createCard())
         let originalData = try Data(contentsOf: store.documentURL)
@@ -577,6 +584,270 @@ struct StoreTests {
     }
 
     @MainActor
+    static func privateLeafLinkIsolation() throws {
+        let privateDirectory = try temporaryDirectory()
+        let sharedDirectory = try temporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: privateDirectory)
+            try? FileManager.default.removeItem(at: sharedDirectory)
+        }
+        let privateBoard = privateDirectory.appendingPathComponent("board.json")
+        let secret = try JSONEncoder().encode(BoardSnapshot(cards: [KanbanCard(title: "PRIVATE-SENTINEL")], boardTitle: "PRIVATE-BOARD"))
+        try secret.write(to: privateBoard)
+        let link = sharedDirectory.appendingPathComponent("board.json")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: privateBoard)
+        let store = BoardStore(directory: sharedDirectory)
+        try expect(store.snapshot.cards.isEmpty && !store.snapshot.boardTitle.contains("PRIVATE"), "Link de folha nunca importa quadro privado válido")
+        try expect(!FileManager.default.fileExists(atPath: store.backupURL.path), "Link privado não produz backup compartilhado")
+        try expect(try Data(contentsOf: privateBoard) == secret, "Alvo privado conserva bytes")
+        try expect(try FileManager.default.contentsOfDirectory(atPath: privateDirectory.path) == ["board.json"], "Alvo privado conserva nome sem quarentena")
+        let preserved = try quarantinedFiles(in: sharedDirectory)
+        try expect(preserved.count == 1 && FileManager.default.destinationOfSymbolicLink(atPath: preserved[0].path) == privateBoard.path, "Preserva somente entrada do link")
+        _ = try unwrap(store.createCard())
+        try expect(store.saveError == nil && !FileManager.default.fileExists(atPath: store.backupURL.path), "Primeiro salvamento usa novo quadro, sem backup privado")
+        try expect(store.flush() && !String(decoding: Data(contentsOf: store.backupURL), as: UTF8.self).contains("PRIVATE-SENTINEL"), "Backup posterior contém somente quadro novo")
+        try expect(!String(decoding: Data(contentsOf: store.documentURL), as: UTF8.self).contains("PRIVATE-SENTINEL"), "Snapshot e JSON novo não revelam sentinela privada")
+    }
+
+    @MainActor
+    static func parentPathTrust() throws {
+        let fixture = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        let external = fixture.appendingPathComponent("private-parent", isDirectory: true)
+        let child = external.appendingPathComponent("board-root", isDirectory: true)
+        try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let secret = try JSONEncoder().encode(BoardSnapshot(cards: [KanbanCard(title: "PRIVATE-PARENT-SENTINEL")]))
+        try secret.write(to: child.appendingPathComponent("board.json"))
+        try secret.write(to: child.appendingPathComponent("board.backup.json"))
+        let linked = fixture.appendingPathComponent("parent-link", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: linked, withDestinationURL: external)
+        let store = BoardStore(directory: linked.appendingPathComponent("board-root", isDirectory: true))
+        try expect(store.snapshot.cards.isEmpty && store.lastSaved == nil && !store.flush(), "Recusa link intermediário antes de ler primary ou backup")
+        try expect(store.recoveryMessage == L("recovery.unsafeRoot") && store.recoveryTitleKey == "storage.alertTitle", "Aviso descreve recusa de caminho antes da leitura")
+        try expect(try Data(contentsOf: child.appendingPathComponent("board.json")) == secret && Data(contentsOf: child.appendingPathComponent("board.backup.json")) == secret, "Link intermediário não toca bytes privados")
+        try expect(Set(FileManager.default.contentsOfDirectory(atPath: child.path)) == Set(["board.json", "board.backup.json"]), "Link intermediário não renomeia nem cria arquivos privados")
+
+        let missingRoot = fixture.appendingPathComponent("new-parent/new-root", isDirectory: true)
+        let regular = BoardStore(directory: missingRoot)
+        _ = try unwrap(regular.createCard())
+        try expect(regular.saveError == nil && regular.flush(), "Cria cadeia nova por descritores e salva em root regular")
+        for url in [missingRoot, missingRoot.deletingLastPathComponent()] {
+            var metadata = stat()
+            try expect(lstat(url.path, &metadata) == 0 && metadata.st_uid == geteuid() && metadata.st_mode & 0o7777 == 0o700, "Diretórios novos são privados")
+        }
+        try expect(BoardStore(directory: missingRoot).snapshot == regular.snapshot, "Root regular novo reabre")
+        let alias = URL(fileURLWithPath: "/tmp", isDirectory: true).appendingPathComponent(fixture.lastPathComponent, isDirectory: true)
+        let aliasStore = BoardStore(directory: alias)
+        try expect(aliasStore.snapshot.cards.isEmpty && !aliasStore.flush() && aliasStore.recoveryMessage == L("recovery.unsafeRoot"), "Alias /tmp explícito também preserva evidência de link")
+    }
+
+    @MainActor
+    static func privatePermissions() throws {
+        for mode: mode_t in [0o755, 0o770, 0o777] {
+            let root = try temporaryDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let bytes = try JSONEncoder().encode(BoardSnapshot(cards: [KanbanCard(title: "UNSAFE-ROOT-SENTINEL")]))
+            let primary = root.appendingPathComponent("board.json")
+            try bytes.write(to: primary)
+            try expect(chmod(root.path, mode) == 0, "Configura root sintético")
+            let store = BoardStore(directory: root)
+            try expect(store.snapshot.cards.isEmpty && !store.flush() && store.recoveryMessage == L("recovery.unsafeRoot"), "Root configurado fora de 0700 é recusado antes da leitura")
+            var metadata = stat()
+            try expect(lstat(root.path, &metadata) == 0 && metadata.st_mode & 0o7777 == mode, "Não corrige silenciosamente permissões configuradas")
+            try expect(try Data(contentsOf: primary) == bytes && FileManager.default.contentsOfDirectory(atPath: root.path) == ["board.json"], "Root inseguro conserva arquivos sem quarentena")
+        }
+
+        for (parentMode, allowed): (mode_t, Bool) in [(0o755, true), (0o777, false), (0o1777, true)] {
+            let parent = try temporaryDirectory()
+            defer { try? FileManager.default.removeItem(at: parent) }
+            let root = parent.appendingPathComponent("board-root", isDirectory: true)
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+            let value = BoardSnapshot(cards: [KanbanCard(title: "PARENT-POLICY-SENTINEL")])
+            let bytes = try JSONEncoder().encode(value)
+            try bytes.write(to: root.appendingPathComponent("board.json"))
+            try expect(chmod(parent.path, parentMode) == 0, "Configura pai sintético")
+            let store = BoardStore(directory: root)
+            try expect((store.snapshot == value) == allowed && store.flush() == allowed, "Pai com escrita estrangeira exige proteção sticky e proprietário seguro")
+            if !allowed { try expect(try Data(contentsOf: root.appendingPathComponent("board.json")) == bytes, "Pai inseguro não modifica conteúdo") }
+        }
+
+        for mode: mode_t in [0o600, 0o644, 0o666] {
+            let root = try temporaryDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let value = BoardSnapshot(cards: [KanbanCard(title: "LEAF-POLICY-SENTINEL")])
+            let primary = root.appendingPathComponent("board.json")
+            let bytes = try JSONEncoder().encode(value)
+            try bytes.write(to: primary)
+            try expect(chmod(primary.path, mode) == 0, "Configura arquivo sintético")
+            let store = BoardStore(directory: root)
+            if mode == 0o666 {
+                try expect(store.snapshot.cards.isEmpty && !store.flush() && store.recoveryMessage == L("recovery.unsafeRoot"), "Arquivo gravável por terceiros é recusado sem leitura")
+                try expect(try Data(contentsOf: primary) == bytes && quarantinedFiles(in: root).isEmpty, "Arquivo inseguro não é movido nem alterado")
+            } else {
+                try expect(store.snapshot == value && store.flush(), "Importa arquivo atual 0600 ou 0644 dentro de root privada")
+            }
+        }
+    }
+
+    @MainActor
+    static func accessControlLists() throws {
+        for clause in ["everyone deny delete", "user:" + NSUserName() + " allow read,write,execute,delete"] {
+            let root = try temporaryDirectory()
+            defer { try? clearACL(root); try? FileManager.default.removeItem(at: root) }
+            try setACL(root, clause: clause)
+            let store = BoardStore(directory: root)
+            let id = try unwrap(store.createCard())
+            try expect(store.saveError == nil && store.flush() && BoardStore(directory: root).card(id: id) != nil, "ACL deny-only ou concessão somente ao usuário atual permanece compatível")
+        }
+        let emptyACLRoot = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: emptyACLRoot) }
+        let emptyFD = open(emptyACLRoot.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        try expect(emptyFD >= 0, "Abre root para ACL vazia")
+        defer { close(emptyFD) }
+        let emptyACL = try unwrap(acl_init(0))
+        defer { acl_free(UnsafeMutableRawPointer(emptyACL)) }
+        try expect(acl_set_fd_np(emptyFD, emptyACL, ACL_TYPE_EXTENDED) == 0, "Configura ACL vazia válida")
+        try expect(BoardStore(directory: emptyACLRoot).flush(), "ACL vazia é aceita")
+
+        for unsafeLeaf in [false, true] {
+            let root = try temporaryDirectory()
+            let primary = root.appendingPathComponent("board.json")
+            defer {
+                try? clearACL(primary)
+                try? clearACL(root)
+                try? FileManager.default.removeItem(at: root)
+            }
+            let bytes = try JSONEncoder().encode(BoardSnapshot(cards: [KanbanCard(title: "ACL-PRIVATE-SENTINEL")]))
+            try bytes.write(to: primary)
+            try setACL(unsafeLeaf ? primary : root, clause: unsafeLeaf ? "everyone allow read" : "everyone allow read,write,execute,file_inherit,directory_inherit")
+            let store = BoardStore(directory: root)
+            try expect(store.snapshot.cards.isEmpty && !store.flush() && store.recoveryMessage == L("recovery.unsafeRoot"), "ACL estrangeira bloqueia leitura mesmo com root 0700 ou arquivo 0644")
+            try expect(try Data(contentsOf: primary) == bytes && FileManager.default.contentsOfDirectory(atPath: root.path) == ["board.json"], "ACL insegura conserva bytes e nomes sem alteração")
+        }
+
+        let parent = try temporaryDirectory()
+        defer { try? clearACL(parent); try? FileManager.default.removeItem(at: parent) }
+        let root = parent.appendingPathComponent("board-root", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        let privateBytes = try JSONEncoder().encode(BoardSnapshot(cards: [KanbanCard(title: "ACL-PARENT-SENTINEL")]))
+        try privateBytes.write(to: root.appendingPathComponent("board.json"))
+        try setACL(parent, clause: "everyone allow write,delete,delete_child")
+        let parentStore = BoardStore(directory: root)
+        try expect(parentStore.snapshot.cards.isEmpty && !parentStore.flush(), "ACL de escrita no pai também bloqueia o caminho")
+        try expect(try Data(contentsOf: root.appendingPathComponent("board.json")) == privateBytes, "ACL do pai não expõe nem muda quadro")
+        try clearACL(parent)
+        try setACL(parent, clause: "everyone allow read,execute,file_inherit,directory_inherit")
+        let newRoot = parent.appendingPathComponent("inherited-root", isDirectory: true)
+        let inherited = BoardStore(directory: newRoot)
+        _ = try unwrap(inherited.createCard())
+        try expect(inherited.saveError != nil && !inherited.flush(), "Recusa ACL pública herdada antes de escrever conteúdo privado")
+        try expect(try FileManager.default.contentsOfDirectory(atPath: newRoot.path).isEmpty, "Root nova com ACL insegura não recebe JSON nem backup")
+    }
+
+    @MainActor
+    static func legacyDefaultPermissions() throws {
+        for (mode, unsafeACL): (mode_t, Bool) in [(0o755, false), (0o777, false), (0o755, true)] {
+            let root = try temporaryDirectory()
+            defer { try? clearACL(root); try? FileManager.default.removeItem(at: root) }
+            let bytes = Data("Preservar conteúdo durante migração".utf8)
+            let marker = root.appendingPathComponent("marker.txt")
+            try bytes.write(to: marker)
+            try expect(chmod(root.path, mode) == 0, "Configura pasta legada sintética")
+            if unsafeACL { try setACL(root, clause: "everyone allow read,write,execute") }
+            let descriptor = open(root.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            try expect(descriptor >= 0, "Abre descritor de migração sintética")
+            defer { close(descriptor) }
+            var migrated = false
+            do { migrated = try BoardStore.tightenLegacyDefaultPermissions(descriptor: descriptor) }
+            catch { try expect(mode != 0o755 || unsafeACL, "Migração segura 0755 deve ser aceita") }
+            var metadata = stat()
+            try expect(fstat(descriptor, &metadata) == 0, "Consulta modo depois da migração")
+            try expect(migrated == (mode == 0o755 && !unsafeACL), "Migração restringe somente root legada 0755 segura")
+            try expect(metadata.st_mode & 0o7777 == (migrated ? 0o700 : mode), "Migração recusada não corrige permissões ou ACLs")
+            try expect(try Data(contentsOf: marker) == bytes && FileManager.default.contentsOfDirectory(atPath: root.path) == ["marker.txt"], "Migração preserva conteúdo e nomes")
+            if migrated { try expect(!BoardStore.tightenLegacyDefaultPermissions(descriptor: descriptor), "Migração é idempotente") }
+        }
+    }
+
+    @MainActor
+    static func parentSwapProtection() throws {
+        let fixture = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        let parent = fixture.appendingPathComponent("original-parent", isDirectory: true)
+        let root = parent.appendingPathComponent("board-root", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let store = BoardStore(directory: root)
+        let id = try unwrap(store.createCard())
+        let originalBytes = try Data(contentsOf: store.documentURL)
+        let retained = fixture.appendingPathComponent("retained-parent", isDirectory: true)
+        try FileManager.default.moveItem(at: parent, to: retained)
+        let external = fixture.appendingPathComponent("external-parent", isDirectory: true)
+        let externalRoot = external.appendingPathComponent("board-root", isDirectory: true)
+        try FileManager.default.createDirectory(at: externalRoot, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let secret = try JSONEncoder().encode(BoardSnapshot(cards: [KanbanCard(title: "SWAPPED-PRIVATE-SENTINEL")]))
+        let externalBoard = externalRoot.appendingPathComponent("board.json")
+        try secret.write(to: externalBoard)
+        try FileManager.default.createSymbolicLink(at: parent, withDestinationURL: external)
+        try expect(store.updateCard(id: id, title: "Edição pendente") && !store.flush(), "Troca de ancestral suspende IO e mantém edição em memória")
+        try expect(try Data(contentsOf: externalBoard) == secret && FileManager.default.contentsOfDirectory(atPath: externalRoot.path) == ["board.json"], "Descritores fixados não seguem ancestral substituído")
+        try expect(try Data(contentsOf: retained.appendingPathComponent("board-root/board.json")) == originalBytes, "Recusa não altera root original desconectada do caminho")
+        try FileManager.default.removeItem(at: parent)
+        try FileManager.default.moveItem(at: retained, to: parent)
+        try expect(store.flush() && BoardStore(directory: root).card(id: id)?.title == "Edição pendente", "Restaura ancestral original e salva edição pendente")
+    }
+
+    @MainActor
+    static func interruptedInitialLoad() throws {
+        for correction in ["remove", "corrupt", "secure"] {
+            let root = try temporaryDirectory()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let primary = root.appendingPathComponent("board.json")
+            let backup = root.appendingPathComponent("board.backup.json")
+            let value = BoardSnapshot(cards: [KanbanCard(title: "INITIAL-LOAD-SENTINEL")], boardTitle: "Quadro preservado")
+            let primaryBytes = try JSONEncoder().encode(value)
+            let backupBytes = try JSONEncoder().encode(BoardSnapshot(cards: [KanbanCard(title: "Backup anterior")]))
+            try primaryBytes.write(to: primary)
+            try backupBytes.write(to: backup)
+            try expect(chmod(backup.path, 0o666) == 0, "Configura backup inseguro depois de primary válido")
+            let store = BoardStore(directory: root)
+            try expect(store.snapshot.cards.isEmpty && store.lastSaved == nil && store.recoveryMessage == L("recovery.unsafeRoot"), "Carga interrompida não assume fingerprint ou data de primary não exibido")
+            if correction == "remove" {
+                try FileManager.default.removeItem(at: backup)
+            } else {
+                try expect(chmod(backup.path, 0o600) == 0, "Corrige somente acesso do backup sintético")
+                if correction == "corrupt" { try Data("Backup inválido depois da correção".utf8).write(to: backup) }
+            }
+            _ = try unwrap(store.createCard())
+            try expect(store.saveError != nil && !store.flush(), "Instância vazia exige reabrir antes de gravar sobre primary existente")
+            try expect(try Data(contentsOf: primary) == primaryBytes, "Corrigir backup sem reiniciar não sobrescreve quadro original")
+            try expect(try quarantinedFiles(in: root).isEmpty, "Instância interrompida não move primary nem backup corrigido")
+            let reopened = BoardStore(directory: root)
+            try expect(reopened.snapshot == value && reopened.lastSaved != nil, "Reabrir instala quadro preservado como snapshot válido")
+            let id = try unwrap(reopened.snapshot.cards.first?.id)
+            try expect(reopened.updateCard(id: id, title: "Edição após reabrir") && reopened.saveError == nil, "Sessão reaberta aceita edição e salvamento")
+            try expect(BoardStore(directory: root).card(id: id)?.title == "Edição após reabrir", "Salvamento depois de reabrir permanece funcional")
+        }
+    }
+
+    static func setACL(_ url: URL, clause: String) throws {
+        try chmodCommand(["+a", clause, url.path])
+    }
+
+    static func clearACL(_ url: URL) throws {
+        try chmodCommand(["-N", url.path])
+    }
+
+    static func chmodCommand(_ arguments: [String]) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/chmod")
+        process.arguments = arguments
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        try expect(process.terminationStatus == 0, "Configura ACL somente em fixture sintética")
+    }
+
+    @MainActor
     static func rejectedFixture(_ data: Data, backup: BoardSnapshot, reason: String) throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -595,8 +866,8 @@ struct StoreTests {
     }
 
     static func temporaryDirectory() throws -> URL {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("kanban-store-tests-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let directory = URL(fileURLWithPath: "/private/tmp", isDirectory: true).appendingPathComponent("kanban-store-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         return directory
     }
 

@@ -56,11 +56,12 @@ public sealed class MainWindow : Window
             if (SmokeMode) return;
             if (Store.RecoveryKey is string key)
             {
-                var detail = Locale.T(key switch { "recovery.backup" => "recovery.backupRecovered", "recovery.primary" => "recovery.previous", _ => "recovery.unreadable" });
-                if (Store.RecoveryErrorKey is string reason) detail += "\n\n" + T(reason);
-                Ui.Alert(this, Locale.T("recovery.title"), detail, Locale.T("action.understood"));
+                var unsafeRoot = key == "recovery.unsafeRoot";
+                var detail = Locale.T(key switch { "recovery.unsafeRoot" => "recovery.unsafeRoot", "recovery.backup" => "recovery.backupRecovered", "recovery.primary" => "recovery.previous", _ => "recovery.unreadable" });
+                if (!unsafeRoot && Store.RecoveryErrorKey is string reason) detail += "\n\n" + T(reason);
+                Ui.Alert(this, Locale.T(unsafeRoot ? "storage.alertTitle" : "recovery.title"), detail, Locale.T("action.understood"));
             }
-            if (Preferences.Error is not null || Preferences.ErrorKey is not null)
+            if ((Preferences.Error is not null || Preferences.ErrorKey is not null) && !(Store.RecoveryKey == "recovery.unsafeRoot" && Preferences.ErrorKey == "error.storageUnsafeRoot"))
                 Ui.Alert(this, T("storage.alertTitle", "Board protection"), Preferences.ErrorKey is string preferenceKey ? T(preferenceKey) : Preferences.Error ?? "", T("action.understood"));
             if (Preferences.Value.EditingCardId is Guid id && Store.Find(id) is not null) Dispatcher.BeginInvoke(new Action(() => OpenCard(id)));
         };

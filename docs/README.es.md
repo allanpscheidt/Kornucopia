@@ -4,8 +4,10 @@ Kornucopia organiza tu trabajo en un tablero Kanban con notas adhesivas para Mac
 
 **[Descargar la versión más reciente](https://github.com/allanpscheidt/Kornucopia/releases/latest)** · [Português brasileiro](../README.md)
 
-## Versión 1.0.2
+## Versión 1.0.3
 
+- Verificación del propietario, los permisos y la ruta de la carpeta de datos antes de abrir archivos.
+- Lectura, copia de seguridad y guardado vinculados a la carpeta verificada en ambas plataformas.
 - Tutoriales prácticos en las cuatro columnas.
 - Interfaz en portugués brasileño, inglés, español, francés y japonés.
 - Selección de idioma guardada en Configuración. Tus notas conservan su texto original.
@@ -13,7 +15,9 @@ Kornucopia organiza tu trabajo en un tablero Kanban con notas adhesivas para Mac
 
 En curso comienza con un límite de dos tarjetas. Una alerta bloquea la entrada de otra cuando se alcanza el límite. Termina una tarea y muévela a Revisión antes de empezar otra. Puedes aumentar el límite en Configuración. El tablero acepta hasta 10.000 notas dentro de su presupuesto de seguridad. Windows muestra 100 notas por página de cada columna; la búsqueda incluye todas las páginas.
 
-La versión 1.0.2 comprueba el tipo de archivo y su tamaño antes de leer el tablero principal y la copia de seguridad. Los límites compartidos son 16 MiB de JSON y 8 MiB de texto UTF-8 total, con límites menores por campo. Conserva los archivos rechazados de forma segura cuando puede, intenta la copia de seguridad y muestra un aviso. Los textos rechazados permanecen en el editor abierto y pueden copiarse antes de cerrar. Consulta los [límites completos](../README.md#salvamento-e-recuperação).
+La versión 1.0.3 comprueba el tipo de archivo y su tamaño antes de leer el tablero principal y la copia de seguridad. Los límites compartidos son 16 MiB de JSON y 8 MiB de texto UTF-8 total, con límites menores por campo. Conserva los archivos rechazados de forma segura cuando puede, intenta la copia de seguridad y muestra un aviso. Los textos rechazados permanecen en el editor abierto y pueden copiarse antes de cerrar. Consulta los [límites completos](../README.md#salvamento-e-recuperação).
+
+Usa la carpeta de datos predeterminada o una carpeta local privada de tu cuenta. Las rutas configuradas con enlaces o acceso inseguro para otras cuentas pausan la lectura y el guardado antes de abrir archivos. Estos permanecen en su lugar. En Mac, una carpeta predeterminada antigua que supera la verificación recibe permisos privados con un aviso; el contenido del tablero y su copia permanece igual. Consulta las [reglas de acceso](../SECURITY.md#pasta-de-dados-como-limite-de-acesso).
 
 ## Instalar y usar
 

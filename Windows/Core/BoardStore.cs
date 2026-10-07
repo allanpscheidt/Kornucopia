@@ -73,6 +73,7 @@ public sealed class BoardStore
     readonly List<BoardSnapshot> redo = [];
     string? primaryFingerprint;
     string? backupFingerprint;
+    bool accessRefused;
     readonly RootGuard rootGuard;
     Guid? lastEditId;
     long lastEditTick;
@@ -190,64 +191,38 @@ public sealed class BoardStore
     {
         try
         {
-            rootGuard.EnsureCreated();
-            var previous = ExistingValid(DocumentPath, primaryFingerprint);
-            var backup = ExistingValid(BackupPath, backupFingerprint);
+            if (accessRefused) throw new StorageException("error.storageUnsafeRoot");
+            using var directory = rootGuard.Open();
+            var previous = ExistingValid(directory, "board.json", primaryFingerprint);
+            var backup = ExistingValid(directory, "board.backup.json", backupFingerprint);
             if (previous is not null)
             {
-                AtomicWriteChecked(BackupPath, previous.Value.Bytes, backup?.Metadata, rootGuard.Check); backupFingerprint = Fingerprint(previous.Value.Bytes);
+                directory.Write("board.backup.json", previous.Value.Bytes, backup?.Metadata); backupFingerprint = Fingerprint(previous.Value.Bytes);
             }
-            AtomicWriteChecked(DocumentPath, bytes, previous?.Metadata, rootGuard.Check); primaryFingerprint = Fingerprint(bytes);
+            directory.Write("board.json", bytes, previous?.Metadata); primaryFingerprint = Fingerprint(bytes);
             SaveError = null; SaveErrorKey = null; return true;
         }
         catch (StorageException e) { SaveError = e.Key; SaveErrorKey = e.Key; return false; }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { SaveError = e.Message; SaveErrorKey = null; return false; }
     }
-    (byte[] Bytes, EntryMetadata Metadata)? ExistingValid(string path, string? expected)
+    (byte[] Bytes, EntryMetadata Metadata)? ExistingValid(StorageDirectory directory, string name, string? expected)
     {
-        rootGuard.Check();
-        var metadata = InspectOrMissing(path);
+        var metadata = directory.Inspect(name);
         if (metadata is null) { if (expected is not null) throw new StorageException("error.storageChanged"); return null; }
         try
         {
-            var bytes = ReadBounded(path, metadata.Value);
-            rootGuard.Check();
+            var bytes = directory.Read(name, metadata.Value);
             if (expected is not null && Fingerprint(bytes) == expected) return (bytes, metadata.Value);
             Decode(bytes);
             throw new StorageException("error.storageChanged");
         }
-        catch (StorageException e) when (e.Key != "error.storageChanged")
+        catch (StorageException e) when (e.Key is not ("error.storageChanged" or "error.storageUnsafeRoot"))
         {
-            Preserve(path, metadata.Value); RecoveryKey = "recovery.primary"; RecoveryErrorKey = e.Key; return null;
+            directory.Preserve(name, metadata.Value); RecoveryKey = "recovery.primary"; RecoveryErrorKey = e.Key; return null;
         }
         catch (Exception e) when (e is JsonException or InvalidDataException)
         {
-            Preserve(path, metadata.Value); RecoveryKey = "recovery.primary"; return null;
-        }
-    }
-    public static void AtomicWrite(string path, byte[] bytes)
-        => WriteAtomically(path, bytes, null);
-    internal static void AtomicWriteChecked(string path, byte[] bytes, EntryMetadata? expected, Action? verifyRoot = null)
-    {
-        verifyRoot?.Invoke();
-        var directory = Path.GetDirectoryName(Path.GetFullPath(path))!; CheckRoot(directory, false);
-        WriteAtomically(path, bytes, () => { verifyRoot?.Invoke(); CheckRoot(directory, false); if (InspectOrMissing(path) != expected) throw new StorageException("error.storageChanged"); }, expected is not null, verifyRoot);
-    }
-    static void WriteAtomically(string path, byte[] bytes, Action? check, bool overwrite = true, Action? cleanupRoot = null)
-    {
-        var temporary = path + ".tmp-" + Guid.NewGuid().ToString("N");
-        try
-        {
-            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { stream.Write(bytes); stream.Flush(true); }
-            check?.Invoke();
-            File.Move(temporary, path, overwrite);
-        }
-        finally
-        {
-            var safe = true;
-            try { cleanupRoot?.Invoke(); }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { safe = false; }
-            if (safe && File.Exists(temporary)) File.Delete(temporary);
+            directory.Preserve(name, metadata.Value); RecoveryKey = "recovery.primary"; return null;
         }
     }
     static BoardSnapshot Decode(byte[] bytes)
@@ -323,50 +298,61 @@ public sealed class BoardStore
     }
     void Load()
     {
-        try { rootGuard.EnsureCreated(); }
-        catch (StorageException e) { SaveError = e.Key; SaveErrorKey = e.Key; RecoveryErrorKey = e.Key; RecoveryKey = "recovery.both"; return; }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { SaveError = e.Message; RecoveryKey = "recovery.both"; return; }
-        var damaged = false;
-        BoardSnapshot? primary = null, backup = null;
-        foreach (var path in new[] { DocumentPath, BackupPath })
+        StorageDirectory directory;
+        try { directory = rootGuard.Open(); }
+        catch (StorageException e)
         {
-            EntryMetadata? metadata = null;
-            try
-            {
-                rootGuard.Check();
-                metadata = InspectOrMissing(path); if (metadata is null) continue;
-                var bytes = ReadBounded(path, metadata.Value); var decoded = Decode(bytes);
-                rootGuard.Check();
-                if (path == DocumentPath) { primary = decoded; primaryFingerprint = Fingerprint(bytes); }
-                else { backup = decoded; backupFingerprint = Fingerprint(bytes); }
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
-            {
-                damaged = true;
-                if (e is StorageException storage) RecoveryErrorKey = storage.Key;
-                if (e is StorageException { Key: "error.storageChanged" }) { SaveErrorKey = "error.storageChanged"; SaveError = SaveErrorKey; continue; }
-                try { if (metadata is not null) Preserve(path, metadata.Value); }
-                catch (StorageException preserveError) { SaveErrorKey = preserveError.Key; SaveError = preserveError.Key; }
-                catch (Exception preserveError) when (preserveError is IOException or UnauthorizedAccessException) { SaveError = preserveError.Message; }
-            }
+            SaveError = e.Key; SaveErrorKey = e.Key; RecoveryErrorKey = e.Key;
+            if (e.Key == "error.storageUnsafeRoot") RefuseAccess();
+            else RecoveryKey = "recovery.both";
+            return;
         }
-        Snapshot = primary ?? backup ?? new();
-        if (primary is null && backup is not null) RecoveryKey = "recovery.backup";
-        else if (damaged) RecoveryKey = primary is null ? "recovery.both" : "recovery.primary";
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { SaveError = e.Message; RecoveryKey = "recovery.both"; return; }
+        using (directory)
+        {
+            var damaged = false;
+            BoardSnapshot? primary = null, backup = null;
+            string? primaryHash = null, backupHash = null;
+            foreach (var name in new[] { "board.json", "board.backup.json" })
+            {
+                EntryMetadata? metadata = null;
+                try
+                {
+                    metadata = directory.Inspect(name); if (metadata is null) continue;
+                    var bytes = directory.Read(name, metadata.Value); var decoded = Decode(bytes);
+                    if (name == "board.json") { primary = decoded; primaryHash = Fingerprint(bytes); }
+                    else { backup = decoded; backupHash = Fingerprint(bytes); }
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
+                {
+                    damaged = true;
+                    if (e is StorageException storage) RecoveryErrorKey = storage.Key;
+                    if (e is StorageException { Key: "error.storageUnsafeRoot" })
+                    {
+                        RefuseAccess();
+                        return;
+                    }
+                    if (e is StorageException { Key: "error.storageChanged" } blocked)
+                    { SaveErrorKey = blocked.Key; SaveError = blocked.Key; continue; }
+                    try { if (metadata is not null) directory.Preserve(name, metadata.Value); }
+                    catch (StorageException preserveError) { SaveErrorKey = preserveError.Key; SaveError = preserveError.Key; }
+                    catch (Exception preserveError) when (preserveError is IOException or UnauthorizedAccessException) { SaveError = preserveError.Message; }
+                }
+            }
+            Snapshot = primary ?? backup ?? new();
+            primaryFingerprint = primaryHash; backupFingerprint = backupHash;
+            if (RecoveryErrorKey == "error.storageUnsafeRoot") RecoveryKey = "recovery.unsafeRoot";
+            else if (primary is null && backup is not null) RecoveryKey = "recovery.backup";
+            else if (damaged) RecoveryKey = primary is null ? "recovery.both" : "recovery.primary";
+        }
+    }
+    void RefuseAccess()
+    {
+        accessRefused = true; primaryFingerprint = null; backupFingerprint = null;
+        SaveErrorKey = "error.storageUnsafeRoot"; SaveError = SaveErrorKey;
+        RecoveryErrorKey = SaveErrorKey; RecoveryKey = "recovery.unsafeRoot";
     }
     static string Fingerprint(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes));
-    void Preserve(string path, EntryMetadata metadata) => PreserveReserved(path, DirectoryPath, metadata, verifyRoot: rootGuard.Check);
-    internal static void PreserveReserved(string path, string directory, EntryMetadata metadata, bool preferences = false, Action? verifyRoot = null)
-    {
-        // Rename only an app-reserved entry in this directory, never a link target.
-        verifyRoot?.Invoke();
-        CheckRoot(directory, false);
-        if (Path.GetDirectoryName(Path.GetFullPath(path)) != Path.GetFullPath(directory) || metadata.Kind is not (EntryKind.Regular or EntryKind.Link)) throw new StorageException("error.storageFileType");
-        if (InspectOrMissing(path) is not EntryMetadata current || current != metadata) throw new StorageException("error.storageChanged");
-        verifyRoot?.Invoke();
-        var name = preferences ? Path.GetFileName(path) + ".corrupt-" + Guid.NewGuid().ToString("N") : Path.GetFileNameWithoutExtension(path) + ".corrupt-" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + "-" + Guid.NewGuid().ToString("N") + ".json";
-        File.Move(path, Path.Combine(directory, name));
-    }
     internal sealed class StorageException(string key, Exception? inner = null) : IOException(key, inner)
     {
         public string Key { get; } = key;
@@ -380,73 +366,23 @@ public sealed class BoardStore
     }
     internal sealed class RootGuard(string directory)
     {
-        bool observed;
         string? identity;
-        public void EnsureCreated()
+        public StorageDirectory Open()
         {
-            var current = InspectOrMissing(directory);
-            if (!observed)
+            var operation = StorageDirectory.Open(directory, identity is null);
+            try
             {
-                observed = true;
-                if (current is EntryMetadata initial)
-                {
-                    if (initial.Kind != EntryKind.Directory) throw new StorageException("error.storageFileType");
-                    identity = initial.Identity;
-                }
+                var openedIdentity = operation.Identity;
+                if (identity is not null && openedIdentity != identity) throw new StorageException("error.storageChanged");
+                identity ??= openedIdentity;
+                return operation;
             }
-            if (current is EntryMetadata existing)
-            {
-                if (existing.Kind != EntryKind.Directory) throw new StorageException("error.storageFileType");
-                if (identity != existing.Identity) throw new StorageException("error.storageChanged");
-                return;
-            }
-            if (identity is not null) throw new StorageException("error.storageChanged");
-            var parent = Path.GetDirectoryName(directory); if (parent is not null) Directory.CreateDirectory(parent);
-            var created = OperatingSystem.IsWindows() ? Native.CreateDirectory(directory, IntPtr.Zero) : Native.MkDir(directory, 0x1c0) == 0;
-            if (!created)
-            {
-                var error = Marshal.GetLastPInvokeError();
-                if (error is 17 or 183) throw new StorageException("error.storageChanged");
-                throw new IOException("Unable to create the private data directory.");
-            }
-            current = InspectOrMissing(directory);
-            if (current is not EntryMetadata owned || owned.Kind != EntryKind.Directory) throw new StorageException("error.storageChanged");
-            identity = owned.Identity;
+            catch { operation.Dispose(); throw; }
         }
-        public void Check()
-        {
-            var current = InspectOrMissing(directory);
-            if (!observed || identity is null || current is not EntryMetadata existing || existing.Identity != identity) throw new StorageException("error.storageChanged");
-            if (existing.Kind != EntryKind.Directory) throw new StorageException("error.storageFileType");
-        }
-    }
-    internal static void CheckRoot(string directory, bool create)
-    {
-        var metadata = InspectOrMissing(directory);
-        if (metadata is not null && metadata.Value.Kind != EntryKind.Directory) throw new StorageException("error.storageFileType");
-        if (!create) return;
-        Directory.CreateDirectory(directory);
-        if (InspectOrMissing(directory) is not EntryMetadata current || current.Kind != EntryKind.Directory) throw new StorageException("error.storageFileType");
     }
     internal enum EntryKind { Regular, Directory, Link, Other }
     internal readonly record struct EntryMetadata(string Identity, string Revision, EntryKind Kind, long Links);
-    internal static EntryMetadata? InspectOrMissing(string path)
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            using var handle = Native.CreateFile(path, 0x80, 7, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero);
-            if (handle.IsInvalid) { var error = Marshal.GetLastPInvokeError(); if (error is 2 or 3) return null; throw new IOException("Unable to inspect the reserved board file."); }
-            return Metadata(handle);
-        }
-        var buffer = Marshal.AllocHGlobal(512);
-        try
-        {
-            if (Native.LStat(path, buffer) != 0) { var error = Marshal.GetLastPInvokeError(); if (error is 2 or 20) return null; throw new IOException("Unable to inspect the reserved board file."); }
-            return UnixMetadata(buffer);
-        }
-        finally { Marshal.FreeHGlobal(buffer); }
-    }
-    static EntryMetadata Metadata(SafeFileHandle handle)
+    internal static EntryMetadata Metadata(SafeFileHandle handle)
     {
         if (OperatingSystem.IsWindows())
         {
@@ -458,7 +394,7 @@ public sealed class BoardStore
         try { if (Native.FStat(handle.DangerousGetHandle().ToInt32(), buffer) != 0) throw new IOException("Unable to inspect the open board file."); return UnixMetadata(buffer); }
         finally { Marshal.FreeHGlobal(buffer); }
     }
-    static EntryMetadata UnixMetadata(IntPtr data)
+    internal static EntryMetadata UnixMetadata(IntPtr data)
     {
         var mac = OperatingSystem.IsMacOS(); var arm = RuntimeInformation.ProcessArchitecture == Architecture.Arm64;
         var mode = mac ? (ushort)Marshal.ReadInt16(data, 4) : Marshal.ReadInt32(data, arm ? 16 : 24);
@@ -470,37 +406,6 @@ public sealed class BoardStore
         var modified = Marshal.ReadInt64(data, mac ? 48 : 88); var modifiedNanos = Marshal.ReadInt64(data, mac ? 56 : 96);
         var changed = Marshal.ReadInt64(data, mac ? 64 : 104); var changedNanos = Marshal.ReadInt64(data, mac ? 72 : 112);
         return new($"{device:x}:{inode:x}", $"{size:x}:{modified:x}:{modifiedNanos:x}:{changed:x}:{changedNanos:x}", kind, links);
-    }
-    internal static byte[] ReadBounded(string path, EntryMetadata expected, int maximumBytes = BoardBudget.FileBytes)
-    {
-        if (expected.Kind != EntryKind.Regular || expected.Links != 1) throw new StorageException("error.storageFileType");
-        SafeFileHandle handle;
-        if (OperatingSystem.IsWindows()) handle = Native.CreateFile(path, 0x80000000, 1, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero);
-        else
-        {
-            var flags = OperatingSystem.IsMacOS() ? 0x104 : 0x20800; // O_NOFOLLOW | O_NONBLOCK.
-            var descriptor = Native.Open(path, flags);
-            handle = new SafeFileHandle(new IntPtr(descriptor), true);
-        }
-        using (handle)
-        {
-            if (handle.IsInvalid) throw new IOException("Unable to open the reserved board file safely.");
-            if (Metadata(handle) != expected) throw new StorageException("error.storageChanged");
-            using var stream = new FileStream(handle, FileAccess.Read, 65536, false);
-            var length = stream.Length;
-            if (length > maximumBytes) throw new StorageException("error.storageFileSize");
-            var bytes = new byte[(int)length]; var read = 0;
-            while (read < bytes.Length)
-            {
-                var count = stream.Read(bytes, read, bytes.Length - read);
-                if (count == 0) throw new StorageException("error.storageChanged");
-                read += count;
-            }
-            // A growing file is refused after one extra byte, never read without a bound.
-            if (stream.ReadByte() != -1) throw new StorageException("error.storageFileSize");
-            if (Metadata(handle) != expected) throw new StorageException("error.storageChanged");
-            return bytes;
-        }
     }
     static class Native
     {

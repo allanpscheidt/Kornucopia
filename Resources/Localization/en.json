@@ -173,5 +173,8 @@
   "action.copyAndClose": "Copy draft and close",
   "error.copyDraft": "The draft could not be copied. The editor remains open.",
   "error.preferencesBudget": "The preferences exceed the safety limits or use a rejected file type. The file allows 64 KiB and search allows 4 KiB of UTF-8 text.",
-  "error.preferencesChanged": "The preferences changed outside this app. Saving is paused to preserve that other version."
+  "error.preferencesChanged": "The preferences changed outside this app. Saving is paused to preserve that other version.",
+  "error.storageUnsafeRoot": "The data folder or its files have unsafe access or contain links. Reading and saving are paused to protect their contents. Use local storage in your account with restricted access.",
+  "recovery.unsafeRoot": "Storage was refused before reading its files. Use your account’s default folder or a local folder with private files, without links or access granted to other accounts. Your files remain in place.",
+  "recovery.permissionsUpdated": "The app restricted access to your default data folder to your account. Your boards and backups remain unchanged."
 }

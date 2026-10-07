@@ -2,11 +2,26 @@ using System.Text.Json;
 using System.Runtime.InteropServices;
 using System.Diagnostics;
 using System.Text;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using Kornucopia.Core;
 using Kornucopia.Windows;
 
 var root = Path.Combine(Path.GetTempPath(), "kornucopia-core-test-" + Guid.NewGuid().ToString("N"));
-Directory.CreateDirectory(root);
+PrivateFolder(root);
+void PrivateFolder(string path)
+{
+    Directory.CreateDirectory(path);
+    if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+    else
+    {
+        using var token = WindowsIdentity.GetCurrent(); var user = token.User!;
+        var security = new DirectorySecurity(); security.SetOwner(user); security.SetAccessRuleProtection(true, false);
+        foreach (var sid in new[] { user, new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null) })
+            security.AddAccessRule(new FileSystemAccessRule(sid, FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+        new DirectoryInfo(path).SetAccessControl(security);
+    }
+}
 int passed = 0;
 void Check(bool value, string name) { if (!value) throw new InvalidOperationException(name); passed++; Console.WriteLine("PASS " + name); }
 try
@@ -37,7 +52,7 @@ try
     var blocked = Path.Combine(root, "file-instead-of-directory"); File.WriteAllText(blocked, "fixture"); var failure = new BoardStore(blocked); failure.Create(); Check(failure.SaveError is not null && failure.Snapshot.Cards.Count == 1 && !failure.Flush(), "Save failures keep cards in memory");
 
     var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-    string Folder(string name) { var path = Path.Combine(root, name); Directory.CreateDirectory(path); return path; }
+    string Folder(string name) { var path = Path.Combine(root, name); PrivateFolder(path); return path; }
     byte[] Encode(BoardSnapshot value) => JsonSerializer.SerializeToUtf8Bytes(value, options);
     BoardStore Fixture(string name, BoardSnapshot value) { var directory = Folder(name); File.WriteAllBytes(Path.Combine(directory, "board.json"), Encode(value)); return new BoardStore(directory); }
     BoardSnapshot CardsFixture(int count, string notes = "") => new() { Cards = Enumerable.Range(0, count).Select(_ => new Card { Notes = notes }).ToArray() };
@@ -91,7 +106,7 @@ try
     var directoryAlias = Folder("nonregular-directory"); var reservedDirectory = Path.Combine(directoryAlias, "board.json"); Directory.CreateDirectory(reservedDirectory); var marker = Path.Combine(reservedDirectory, "preserve.txt"); File.WriteAllText(marker, "owned fixture"); var directoryStore = new BoardStore(directoryAlias);
     Check(directoryStore.Create() is not null && !directoryStore.Flush() && directoryStore.SaveErrorKey == "error.storageFileType" && File.ReadAllText(marker) == "owned fixture" && Directory.Exists(reservedDirectory), "Directory at reserved file path is neither read nor renamed or overwritten");
     var realRoot = Folder("root-link-target"); var linkedRoot = Path.Combine(root, "linked-data-root"); File.WriteAllBytes(Path.Combine(realRoot, "board.json"), outsideBytes); Directory.CreateSymbolicLink(linkedRoot, realRoot); var rootLinkStore = new BoardStore(linkedRoot);
-    Check(rootLinkStore.Snapshot.Cards.Count == 0 && !rootLinkStore.Flush() && rootLinkStore.SaveErrorKey == "error.storageFileType" && File.ReadAllBytes(Path.Combine(realRoot, "board.json")).SequenceEqual(outsideBytes), "A symbolic data root cannot redirect reads, quarantine or writes");
+    Check(rootLinkStore.Snapshot.Cards.Count == 0 && !rootLinkStore.Flush() && rootLinkStore.SaveErrorKey == "error.storageUnsafeRoot" && File.ReadAllBytes(Path.Combine(realRoot, "board.json")).SequenceEqual(outsideBytes), "A symbolic data root cannot redirect reads, quarantine or writes");
     if (!OperatingSystem.IsWindows())
     {
         var fifoDirectory = Folder("nonregular-fifo"); var fifoPath = Path.Combine(fifoDirectory, "board.json"); NativeTests.Fifo(fifoPath); watch.Restart(); var fifoStore = new BoardStore(fifoDirectory);
@@ -126,11 +141,103 @@ try
     });
     writing.Wait(); watch.Restart(); var growing = new BoardStore(growingDirectory); writer.GetAwaiter().GetResult();
     Check(watch.Elapsed < TimeSpan.FromSeconds(10) && growing.RecoveryKey is not null && growing.Snapshot.Cards.Count == 0 && (File.Exists(growingPath) || Directory.GetFiles(growingDirectory, "*.corrupt-*.json").Length == 1), "Concurrent growth is refused with bounded reading and recoverable source preservation");
-    var boardRoot = Path.Combine(root, "replaced-board-root"); var rootOwnedBoard = new BoardStore(boardRoot); rootOwnedBoard.Create(); var retainedBoardRoot = boardRoot + "-retained"; Directory.Move(boardRoot, retainedBoardRoot); Directory.CreateDirectory(boardRoot);
+    var boardRoot = Path.Combine(root, "replaced-board-root"); var rootOwnedBoard = new BoardStore(boardRoot); rootOwnedBoard.Create(); var retainedBoardRoot = boardRoot + "-retained"; Directory.Move(boardRoot, retainedBoardRoot); PrivateFolder(boardRoot);
     var foreignInvalid = Encoding.UTF8.GetBytes("{external-invalid-json"); File.WriteAllBytes(Path.Combine(boardRoot, "board.json"), foreignInvalid);
     var boardRootSafe = !rootOwnedBoard.Flush() && rootOwnedBoard.SaveErrorKey == "error.storageChanged" && File.ReadAllBytes(Path.Combine(boardRoot, "board.json")).SequenceEqual(foreignInvalid) && Directory.GetFiles(boardRoot, "*.corrupt-*").Length == 0 && File.Exists(Path.Combine(retainedBoardRoot, "board.json"));
-    var prefsRoot = Folder("replaced-preferences-root"); var rootOwnedPreferences = new PreferenceStore(prefsRoot); rootOwnedPreferences.Load(); rootOwnedPreferences.Save(new Preferences { Query = "Original session literal" }); Directory.Move(prefsRoot, prefsRoot + "-retained"); Directory.CreateDirectory(prefsRoot); File.WriteAllBytes(Path.Combine(prefsRoot, "preferences.json"), foreignInvalid);
+    var prefsRoot = Folder("replaced-preferences-root"); var rootOwnedPreferences = new PreferenceStore(prefsRoot); rootOwnedPreferences.Load(); rootOwnedPreferences.Save(new Preferences { Query = "Original session literal" }); Directory.Move(prefsRoot, prefsRoot + "-retained"); PrivateFolder(prefsRoot); File.WriteAllBytes(Path.Combine(prefsRoot, "preferences.json"), foreignInvalid);
     Check(boardRootSafe && !rootOwnedPreferences.Save(new Preferences { Language = "ja" }) && rootOwnedPreferences.ErrorKey == "error.preferencesChanged" && File.ReadAllBytes(Path.Combine(prefsRoot, "preferences.json")).SequenceEqual(foreignInvalid) && Directory.GetFiles(prefsRoot, "*.corrupt-*").Length == 0 && File.Exists(Path.Combine(prefsRoot + "-retained", "preferences.json")), "Replacing the real data directory cannot quarantine or overwrite another directory's board or preferences");
+    var parentTarget = Folder("private-parent-target"); var parentChild = Path.Combine(parentTarget, "data"); PrivateFolder(parentChild);
+    File.WriteAllBytes(Path.Combine(parentChild, "board.json"), outsideBytes); File.WriteAllBytes(Path.Combine(parentChild, "preferences.json"), foreignPrefs);
+    var parentLink = Path.Combine(root, "parent-link"); NativeTests.DirectoryLink(parentLink, parentTarget);
+    var redirected = new BoardStore(Path.Combine(parentLink, "data")); var redirectedPreferences = new PreferenceStore(Path.Combine(parentLink, "data")); redirectedPreferences.Load();
+    Check(redirected.RecoveryKey == "recovery.unsafeRoot" && redirected.Snapshot.Cards.Count == 0 && redirected.SaveErrorKey == "error.storageUnsafeRoot" && !redirected.Flush() && redirectedPreferences.Value.Query == "" && redirectedPreferences.ErrorKey == "error.storageUnsafeRoot" && !redirectedPreferences.Save(new Preferences()) && Directory.GetFiles(parentChild).Length == 2 && File.ReadAllBytes(Path.Combine(parentChild, "board.json")).SequenceEqual(outsideBytes), "Linked or junction ancestor is refused before board/preferences reads, backup, temp or quarantine");
+    var writableAncestor = Folder("untrusted-ancestor"); var privateChild = Path.Combine(writableAncestor, "data"); PrivateFolder(privateChild); File.WriteAllBytes(Path.Combine(privateChild, "board.json"), outsideBytes);
+    if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(writableAncestor, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupWrite | UnixFileMode.OtherWrite);
+    else
+    {
+        var info = new DirectoryInfo(writableAncestor); var security = info.GetAccessControl(); security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null), FileSystemRights.DeleteSubdirectoriesAndFiles, AccessControlType.Allow)); info.SetAccessControl(security);
+    }
+    var ancestralAccess = new BoardStore(privateChild);
+    Check(ancestralAccess.RecoveryKey == "recovery.unsafeRoot" && ancestralAccess.Snapshot.Cards.Count == 0 && !ancestralAccess.Flush() && Directory.GetFiles(privateChild).Length == 1 && File.ReadAllBytes(Path.Combine(privateChild, "board.json")).SequenceEqual(outsideBytes), "An ancestor that permits foreign replacement is refused before opening private child data");
+    var publicRoot = Folder("untrusted-access-root"); File.WriteAllBytes(Path.Combine(publicRoot, "board.json"), outsideBytes); File.WriteAllBytes(Path.Combine(publicRoot, "preferences.json"), foreignPrefs);
+    if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(publicRoot, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.OtherRead | UnixFileMode.OtherWrite);
+    else
+    {
+        var info = new DirectoryInfo(publicRoot); var security = info.GetAccessControl();
+        security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null), FileSystemRights.ReadAndExecute | FileSystemRights.Write, InheritanceFlags.None, PropagationFlags.None, AccessControlType.Allow)); info.SetAccessControl(security);
+    }
+    var publicBoard = new BoardStore(publicRoot); var publicPreferences = new PreferenceStore(publicRoot); publicPreferences.Load();
+    Check(publicBoard.RecoveryKey == "recovery.unsafeRoot" && publicBoard.Snapshot.Cards.Count == 0 && !publicBoard.Flush() && publicPreferences.ErrorKey == "error.storageUnsafeRoot" && !publicPreferences.Save(new Preferences()) && Directory.GetFiles(publicRoot).Length == 2 && File.ReadAllBytes(Path.Combine(publicRoot, "board.json")).SequenceEqual(outsideBytes), "Storage accessible to an untrusted principal is refused without reading, changing permissions or preserving data elsewhere");
+    if (OperatingSystem.IsWindows())
+    {
+        var unsafeLeafRoot = Folder("unsafe-leaf-acl"); var unsafeLeaf = Path.Combine(unsafeLeafRoot, "board.json"); File.WriteAllBytes(unsafeLeaf, outsideBytes);
+        var info = new FileInfo(unsafeLeaf); var security = info.GetAccessControl(); security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null), FileSystemRights.Read, AccessControlType.Allow)); info.SetAccessControl(security);
+        var unsafeLeafStore = new BoardStore(unsafeLeafRoot);
+        Check(unsafeLeafStore.RecoveryKey == "recovery.unsafeRoot" && unsafeLeafStore.Snapshot.Cards.Count == 0 && !unsafeLeafStore.Flush() && Directory.GetFiles(unsafeLeafRoot).Length == 1 && File.ReadAllBytes(unsafeLeaf).SequenceEqual(outsideBytes), "Existing Windows leaf with a public DACL is refused by handle before reading and is not quarantined");
+        var publicPreference = Path.Combine(unsafeLeafRoot, "preferences.json"); File.WriteAllBytes(publicPreference, foreignPrefs); var preferenceInfo = new FileInfo(publicPreference); var preferenceSecurity = preferenceInfo.GetAccessControl(); preferenceSecurity.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null), FileSystemRights.Read, AccessControlType.Allow)); preferenceInfo.SetAccessControl(preferenceSecurity);
+        var unsafeLeafPreferences = new PreferenceStore(unsafeLeafRoot); unsafeLeafPreferences.Load();
+        Check(unsafeLeafPreferences.ErrorKey == "error.storageUnsafeRoot" && unsafeLeafPreferences.Value.Query == "" && !unsafeLeafPreferences.Save(new Preferences()) && Directory.GetFiles(unsafeLeafRoot).Length == 2 && File.ReadAllBytes(publicPreference).SequenceEqual(foreignPrefs), "Public Windows preference leaf is refused before reading and retained without chmod or quarantine");
+    }
+    else
+    {
+        var normalImport = Folder("private-root-import"); var importPath = Path.Combine(normalImport, "board.json"); File.WriteAllBytes(importPath, outsideBytes); File.SetUnixFileMode(importPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+        var imported = new BoardStore(normalImport); var importedCard = imported.Snapshot.Cards[0].Id;
+        Check(imported.Snapshot.BoardTitle == "Outside private fixture" && imported.Update(importedCard, title: "Accepted private import") && imported.SaveError is null && new BoardStore(normalImport).Find(importedCard)?.Title == "Accepted private import" && File.GetUnixFileMode(imported.DocumentPath) == (UnixFileMode.UserRead | UnixFileMode.UserWrite), "Regular imported leaf under a private root loads, backs up and becomes a private atomic replacement");
+    }
+    void ExposeLeaf(string path)
+    {
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.OtherWrite);
+        else { var info = new FileInfo(path); var security = info.GetAccessControl(); security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null), FileSystemRights.Read, AccessControlType.Allow)); info.SetAccessControl(security); }
+    }
+    var deniedPrimaryRoot = Folder("unsafe-primary-invalid-backup"); var deniedPrimaryPath = Path.Combine(deniedPrimaryRoot, "board.json"); File.WriteAllBytes(deniedPrimaryPath, outsideBytes); ExposeLeaf(deniedPrimaryPath);
+    var deniedBackupPath = Path.Combine(deniedPrimaryRoot, "board.backup.json"); var deniedBackupBytes = Encoding.UTF8.GetBytes("{invalid-backup"); File.WriteAllBytes(deniedBackupPath, deniedBackupBytes);
+    var deniedPrimary = new BoardStore(deniedPrimaryRoot);
+    Check(deniedPrimary.RecoveryKey == "recovery.unsafeRoot" && deniedPrimary.RecoveryErrorKey == "error.storageUnsafeRoot" && deniedPrimary.Snapshot.Cards.Count == 0 && Directory.GetFiles(deniedPrimaryRoot).Length == 2 && File.ReadAllBytes(deniedBackupPath).SequenceEqual(deniedBackupBytes), "Unsafe primary stops startup before an invalid backup is inspected or quarantined");
+    var partialRoot = Folder("unsafe-backup-partial-load"); var partialPrimaryPath = Path.Combine(partialRoot, "board.json"); var partialPrimary = Encode(new BoardSnapshot { BoardTitle = "Legitimate primary retained", Cards = [new Card()] }); File.WriteAllBytes(partialPrimaryPath, partialPrimary);
+    var partialBackupPath = Path.Combine(partialRoot, "board.backup.json"); File.WriteAllBytes(partialBackupPath, outsideBytes); ExposeLeaf(partialBackupPath); var partial = new BoardStore(partialRoot);
+    File.Delete(partialBackupPath); File.WriteAllBytes(partialBackupPath, outsideBytes);
+    partial.Create();
+    Check(partial.RecoveryKey == "recovery.unsafeRoot" && !partial.Flush() && partial.SaveErrorKey == "error.storageUnsafeRoot" && File.ReadAllBytes(partialPrimaryPath).SequenceEqual(partialPrimary) && Directory.GetFiles(partialRoot, "*.corrupt-*").Length == 0 && new BoardStore(partialRoot).Snapshot.BoardTitle == "Legitimate primary retained", "Fixing an unsafe backup does not let the refused instance overwrite a primary it never displayed");
+    PrivateFolder(publicRoot);
+    Check(!publicBoard.Flush() && !publicPreferences.Save(new Preferences { Query = "Unloaded session" }) && publicBoard.SaveErrorKey == "error.storageUnsafeRoot" && publicPreferences.ErrorKey == "error.storageUnsafeRoot" && File.ReadAllBytes(Path.Combine(publicRoot, "board.json")).SequenceEqual(outsideBytes) && File.ReadAllBytes(Path.Combine(publicRoot, "preferences.json")).SequenceEqual(foreignPrefs) && new BoardStore(publicRoot).Snapshot.BoardTitle == "Outside private fixture", "Refused startup remains write-blocked after permissions are corrected until a new load");
+    if (OperatingSystem.IsWindows())
+    {
+        var pinnedAliasRoot = Folder("pin-preservation-entry"); var pinnedAliasPath = Path.Combine(pinnedAliasRoot, "board.json"); NativeTests.HardLink(pinnedAliasPath, outside);
+        bool entryPinned;
+        using (var deleteHandle = NativeTests.HoldDeleteHandle(pinnedAliasPath))
+        {
+            var pinnedAlias = new BoardStore(pinnedAliasRoot);
+            entryPinned = pinnedAlias.Snapshot.Cards.Count == 0 && pinnedAlias.SaveError is not null && !pinnedAlias.Flush() && File.Exists(pinnedAliasPath) && Directory.GetFiles(pinnedAliasRoot).Length == 1;
+        }
+        Check(entryPinned && File.ReadAllBytes(outside).SequenceEqual(outsideBytes), "A preexisting DELETE handle prevents preservation from opening and renaming an aliased entry");
+    }
+    var swappingRoot = Folder("leaf-swap"); var swappingPath = Path.Combine(swappingRoot, "board.json"); var benignBytes = Encode(new BoardSnapshot { BoardTitle = "Benign race fixture", Cards = [new Card()] });
+    using var swappingStop = new CancellationTokenSource();
+    var swapping = Task.Run(() =>
+    {
+        var ownTemp = Path.Combine(swappingRoot, "attack-fixture.tmp");
+        while (!swappingStop.IsCancellationRequested)
+        {
+            try { File.WriteAllBytes(ownTemp, benignBytes); File.Move(ownTemp, swappingPath, true); File.Delete(swappingPath); File.CreateSymbolicLink(swappingPath, outside); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    });
+    var disclosed = false;
+    try
+    {
+        for (var i = 0; i < 48; i++)
+        {
+            var concurrent = new BoardStore(swappingRoot); disclosed |= concurrent.Snapshot.BoardTitle == "Outside private fixture"; concurrent.Create();
+            var concurrentBackup = Path.Combine(swappingRoot, "board.backup.json");
+            try { if (File.Exists(concurrentBackup)) disclosed |= File.ReadAllBytes(concurrentBackup).SequenceEqual(outsideBytes); }
+            catch (IOException) { }
+        }
+    }
+    finally { swappingStop.Cancel(); swapping.GetAwaiter().GetResult(); }
+    Check(!disclosed && File.ReadAllBytes(outside).SequenceEqual(outsideBytes), "Concurrent leaf swaps never decode a linked private board or copy its bytes into a backup");
+    var switchedRoot = Folder("root-switch-link"); var switchedStore = new BoardStore(switchedRoot); switchedStore.Create(); Directory.Move(switchedRoot, switchedRoot + "-retained"); NativeTests.DirectoryLink(switchedRoot, parentChild);
+    Check(!switchedStore.Flush() && switchedStore.SaveErrorKey == "error.storageUnsafeRoot" && File.ReadAllBytes(Path.Combine(parentChild, "board.json")).SequenceEqual(outsideBytes) && Directory.GetFiles(parentChild).Length == 2, "Replacing a loaded root with a link or junction cannot access or mutate the target");
     Console.WriteLine($"PASS: {passed} checks; isolated temporary data only.");
 }
 finally { Directory.Delete(root, true); }
@@ -140,6 +247,21 @@ static class NativeTests
     public static void HardLink(string path, string target)
     {
         if (OperatingSystem.IsWindows() ? !CreateHardLink(path, target, IntPtr.Zero) : Link(target, path) != 0) throw new IOException("Unable to create isolated hard-link fixture.");
+    }
+    public static Microsoft.Win32.SafeHandles.SafeFileHandle HoldDeleteHandle(string path)
+    {
+        var handle = CreateFile(path, 0x10080, 7, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero);
+        if (handle.IsInvalid) { handle.Dispose(); throw new IOException("Unable to pin isolated preservation fixture."); }
+        return handle;
+    }
+    [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)] static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+    public static void DirectoryLink(string path, string target)
+    {
+        if (!OperatingSystem.IsWindows()) { Directory.CreateSymbolicLink(path, target); return; }
+        var start = new ProcessStartInfo("cmd.exe") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var argument in new[] { "/d", "/c", "mklink", "/J", path, target }) start.ArgumentList.Add(argument);
+        using var process = Process.Start(start) ?? throw new IOException("Unable to create isolated junction fixture.");
+        process.WaitForExit(); if (process.ExitCode != 0) throw new IOException("Unable to create isolated junction fixture.");
     }
     public static void Fifo(string path) { if (MkFifo(path, 0x180) != 0) throw new IOException("Unable to create isolated FIFO fixture."); }
     [DllImport("kernel32.dll", EntryPoint = "CreateHardLinkW", CharSet = CharSet.Unicode, SetLastError = true)]

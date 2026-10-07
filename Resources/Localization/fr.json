@@ -173,5 +173,8 @@
   "action.copyAndClose": "Copier le brouillon et fermer",
   "error.copyDraft": "Le brouillon n’a pas pu être copié. L’éditeur reste ouvert.",
   "error.preferencesBudget": "Les préférences dépassent les limites de sécurité ou utilisent un type de fichier refusé. Le fichier accepte 64 Kio et la recherche accepte 4 Kio de texte UTF-8.",
-  "error.preferencesChanged": "Les préférences ont changé en dehors de cette app. L’enregistrement est suspendu pour préserver cette autre version."
+  "error.preferencesChanged": "Les préférences ont changé en dehors de cette app. L’enregistrement est suspendu pour préserver cette autre version.",
+  "error.storageUnsafeRoot": "Le dossier de données ou ses fichiers ont un accès non sécurisé ou contiennent des liens. La lecture et l’enregistrement sont suspendus pour protéger leur contenu. Utilisez un stockage local de votre compte à accès restreint.",
+  "recovery.unsafeRoot": "Le stockage a été refusé avant la lecture de ses fichiers. Utilisez le dossier par défaut de votre compte ou un dossier local avec des fichiers privés, sans liens ni accès accordé à d’autres comptes. Vos fichiers restent en place.",
+  "recovery.permissionsUpdated": "L’app a limité l’accès au dossier de données par défaut à votre compte. Vos tableaux et sauvegardes restent inchangés."
 }
